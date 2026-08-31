@@ -5,7 +5,13 @@ const usernameInput = document.querySelector("#usernameInput");
 const passwordInput = document.querySelector("#passwordInput");
 const loginError = document.querySelector("#loginError");
 const gameGrid = document.querySelector("#gameGrid");
+const emptyLibrary = document.querySelector("#emptyLibrary");
 const libraryView = document.querySelector("#libraryView");
+const addGameView = document.querySelector("#addGameView");
+const catalogGrid = document.querySelector("#catalogGrid");
+const openAddGameButton = document.querySelector("#openAddGameButton");
+const emptyAddGameButton = document.querySelector("#emptyAddGameButton");
+const backFromAddGameButton = document.querySelector("#backFromAddGameButton");
 const detailView = document.querySelector("#detailView");
 const detailContent = document.querySelector("#detailContent");
 const backToLibraryButton = document.querySelector("#backToLibraryButton");
@@ -45,6 +51,7 @@ let activeDetailGame = null;
 let detailRenderSignature = "";
 let lastDetailRefresh = 0;
 let gamesLoadPromise = null;
+let catalogLoadPromise = null;
 let detailLoadPromise = null;
 let logsLoadPromise = null;
 let dashboardPollInFlight = false;
@@ -108,6 +115,7 @@ function setView(authenticated) {
   if (!authenticated) {
     closeLogs();
     closeGameDetail();
+    closeAddGame();
   }
 }
 
@@ -413,6 +421,8 @@ function render(payload) {
     for (const [gameId, card] of existing) {
       if (!activeIds.has(gameId)) card.remove();
     }
+    gameGrid.hidden = games.length === 0;
+    emptyLibrary.hidden = games.length !== 0;
   } else {
     const summary = games.find((game) => game.id === activeGameId);
     if (summary && activeDetailGame) {
@@ -422,6 +432,96 @@ function render(payload) {
   lastUpdated.textContent = tt(`更新于 ${clockFormatter.format(new Date())}`);
   if (activeOperation.running) {
     setMessage(`${tt(activeOperation.message)}。可点击顶部“日志”查看详情。`);
+  }
+}
+
+function renderCatalogGame(game) {
+  const card = createElement("article", `catalog-card${game.added ? " is-added" : ""}`);
+  card.dataset.gameId = game.id;
+  const imageShell = createElement("div", "catalog-visual");
+  if (game.icon) {
+    const image = document.createElement("img");
+    image.src = game.icon;
+    image.alt = tt(`${game.name} 图标`);
+    image.loading = "lazy";
+    imageShell.append(image);
+  }
+  const content = createElement("div", "catalog-content");
+  content.append(
+    createElement("h3", "", game.name),
+    createElement("p", "catalog-description", game.description)
+  );
+  const facts = createElement("dl", "catalog-facts");
+  facts.append(fact("版本", game.version), fact("加载器", game.loader), fact("连接端口", game.endpoint));
+  content.append(facts);
+  const button = createElement(
+    "button",
+    `action-button${game.added ? " secondary" : ""}`,
+    game.added ? "从首页移除" : "添加到首页"
+  );
+  button.type = "button";
+  button.addEventListener("click", () => updateLibraryGame(game, button));
+  content.append(button);
+  card.append(imageShell, content);
+  return card;
+}
+
+function renderCatalog(payload) {
+  catalogGrid.replaceChildren(...(payload.games || []).map(renderCatalogGame));
+}
+
+async function loadCatalog() {
+  if (catalogLoadPromise) return catalogLoadPromise;
+  catalogLoadPromise = (async () => {
+    try {
+      const payload = await api("/api/game-library");
+      renderCatalog(payload);
+      return payload;
+    } catch (error) {
+      setMessage(error.message, true);
+      return null;
+    }
+  })();
+  try {
+    return await catalogLoadPromise;
+  } finally {
+    catalogLoadPromise = null;
+  }
+}
+
+async function updateLibraryGame(game, button) {
+  button.disabled = true;
+  try {
+    const payload = await api(`/api/game-library/${game.id}`, {
+      method: game.added ? "DELETE" : "POST"
+    });
+    setMessage(payload.message);
+    await Promise.all([loadCatalog(), loadGames({ quiet: true })]);
+  } catch (error) {
+    setMessage(error.message, true);
+    button.disabled = false;
+  }
+}
+
+function openAddGame() {
+  activeGameId = null;
+  activeDetailGame = null;
+  detailView.hidden = true;
+  libraryView.hidden = true;
+  addGameView.hidden = false;
+  window.location.hash = "add-game";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  loadCatalog();
+}
+
+function closeAddGame() {
+  const wasOpen = !addGameView.hidden;
+  addGameView.hidden = true;
+  detailView.hidden = true;
+  libraryView.hidden = false;
+  if (wasOpen && sessionToken) loadGames({ quiet: true });
+  if (window.location.hash === "#add-game") {
+    history.replaceState(null, "", window.location.pathname + window.location.search);
   }
 }
 
@@ -1015,6 +1115,7 @@ async function loadGameDetail({ quiet = false } = {}) {
 function openGameDetail(gameId) {
   activeGameId = gameId;
   libraryView.hidden = true;
+  addGameView.hidden = true;
   detailView.hidden = false;
   window.location.hash = `game/${gameId}`;
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1368,6 +1469,9 @@ loginForm.addEventListener("submit", async (event) => {
 });
 
 refreshButton.addEventListener("click", () => loadGames());
+openAddGameButton.addEventListener("click", openAddGame);
+emptyAddGameButton.addEventListener("click", openAddGame);
+backFromAddGameButton.addEventListener("click", closeAddGame);
 backToLibraryButton.addEventListener("click", closeGameDetail);
 refreshDetailButton.addEventListener("click", () => {
   lastDetailRefresh = 0;
@@ -1399,6 +1503,10 @@ logoutButton.addEventListener("click", () => logout("", true));
     setView(true);
     await loadGames();
     beginPolling();
+    if (window.location.hash === "#add-game") {
+      openAddGame();
+      return;
+    }
     const detailMatch = window.location.hash.match(/^#game\/([a-z0-9_-]+)$/);
     if (detailMatch) openGameDetail(detailMatch[1]);
   } catch {

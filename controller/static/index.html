@@ -79,15 +79,39 @@
           <div class="section-heading">
             <div>
               <p class="eyebrow" data-i18n="服务">服务</p>
-              <h2 data-i18n="游戏库">游戏库</h2>
+              <h2 data-i18n="我的游戏">我的游戏</h2>
             </div>
-            <div class="controller-state">
-              <span class="status-mark is-running"></span>
-              <span data-i18n="总控运行中">总控运行中</span>
+            <div class="section-actions">
+              <div class="controller-state">
+                <span class="status-mark is-running"></span>
+                <span data-i18n="总控运行中">总控运行中</span>
+              </div>
+              <button id="openAddGameButton" type="button" class="primary-button compact-button" data-i18n="添加游戏">添加游戏</button>
             </div>
           </div>
 
           <section id="gameGrid" class="game-grid" aria-label="游戏服务" data-i18n-aria-label="游戏服务"></section>
+          <section id="emptyLibrary" class="library-empty glass-panel" hidden>
+            <div class="empty-orb" aria-hidden="true"></div>
+            <p class="eyebrow" data-i18n="开始设置">开始设置</p>
+            <h3 data-i18n="还没有添加游戏">还没有添加游戏</h3>
+            <p data-i18n="从游戏库中选择需要管理的服务器，添加后会显示在这里。">从游戏库中选择需要管理的服务器，添加后会显示在这里。</p>
+            <button id="emptyAddGameButton" type="button" class="primary-button compact-button" data-i18n="添加第一个游戏">添加第一个游戏</button>
+          </section>
+        </section>
+
+        <section id="addGameView" class="add-game-view" hidden>
+          <div class="detail-toolbar">
+            <button id="backFromAddGameButton" type="button" class="text-button" data-i18n="返回我的游戏">返回我的游戏</button>
+          </div>
+          <div class="section-heading add-game-heading">
+            <div>
+              <p class="eyebrow" data-i18n="游戏库">游戏库</p>
+              <h2 data-i18n="添加游戏">添加游戏</h2>
+              <p class="section-description" data-i18n="选择要在这台 NAS 上管理的游戏服务器。">选择要在这台 NAS 上管理的游戏服务器。</p>
+            </div>
+          </div>
+          <section id="catalogGrid" class="catalog-grid" aria-label="可添加的游戏" data-i18n-aria-label="可添加的游戏"></section>
         </section>
 
         <section id="detailView" class="detail-view" hidden>
