@@ -1,7 +1,9 @@
+import copy
 import importlib.util
 import io
 import tarfile
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -59,6 +61,8 @@ class ControllerTests(unittest.TestCase):
         SERVER.ZOMBOID_DETAIL_CACHE.clear()
         SERVER.SESSIONS.clear()
         SERVER.LOGIN_FAILURES.clear()
+        SERVER.MINECRAFT_CATALOG_CACHE["payload"] = None
+        SERVER.MINECRAFT_CATALOG_CACHE["time"] = 0
 
     def tearDown(self):
         SERVER.HOST_PROJECT_MOUNT = self.original_mount
@@ -71,6 +75,8 @@ class ControllerTests(unittest.TestCase):
         SERVER.ZOMBOID_DETAIL_CACHE.clear()
         SERVER.SESSIONS.clear()
         SERVER.LOGIN_FAILURES.clear()
+        SERVER.MINECRAFT_CATALOG_CACHE["payload"] = None
+        SERVER.MINECRAFT_CATALOG_CACHE["time"] = 0
 
     def test_multiple_accounts_create_independent_sessions(self):
         SERVER.ACCOUNTS = {"admin": "admin123", "operator": "another-password"}
@@ -413,6 +419,53 @@ class ControllerTests(unittest.TestCase):
         with self.assertRaises(SERVER.DockerError):
             SERVER.validate_settings(game, {"serverPassword": ""})
         self.assertEqual(SERVER.validate_settings(game, {"serverPassword": None}), {"serverPassword": ""})
+
+    def test_neoforge_version_maps_to_minecraft_release(self):
+        self.assertEqual(SERVER.neoforge_minecraft_version("47.1.79"), "1.20.1")
+        self.assertEqual(SERVER.neoforge_minecraft_version("20.4.237"), "1.20.4")
+        self.assertEqual(SERVER.neoforge_minecraft_version("21.1.133"), "1.21.1")
+        self.assertEqual(SERVER.neoforge_minecraft_version("26.2.0.62"), "26.2")
+
+    def test_loader_minimum_versions_are_enforced(self):
+        self.assertTrue(SERVER.version_at_least("1.14.4", "1.14.4"))
+        self.assertFalse(SERVER.version_at_least("1.12.2", "1.14.4"))
+        self.assertTrue(SERVER.version_at_least("26.2", "1.20.1"))
+        fabric = SERVER.filter_loader_versions(["1.12.2", "1.14.4", "1.20.1", "26.2"], "fabric")
+        neoforge = SERVER.filter_loader_versions(["1.12.2", "1.14.4", "1.20.1", "26.2"], "neoforge")
+        self.assertEqual(fabric, ["26.2", "1.20.1", "1.14.4"])
+        self.assertEqual(neoforge, ["26.2", "1.20.1"])
+
+    def test_minecraft_runtime_applies_loader_and_java_image(self):
+        game = copy.deepcopy(next(item for item in SERVER.GAMES if item["id"] == "minecraft"))
+        SERVER.apply_minecraft_runtime(game, {"loader": "fabric", "mcVersion": "1.20.1"})
+        spec = SERVER.primary_spec_from_game(game)
+        self.assertEqual(spec["environment"]["TYPE"], "FABRIC")
+        self.assertEqual(spec["environment"]["VERSION"], "1.20.1")
+        self.assertNotIn("NEOFORGE_INSTALLER", spec["environment"])
+        self.assertEqual(spec["image"], "itzg/minecraft-server:java17")
+        SERVER.apply_minecraft_runtime(game, {"loader": "vanilla", "mcVersion": "1.16.5"})
+        spec = SERVER.primary_spec_from_game(game)
+        self.assertEqual(spec["environment"]["TYPE"], "VANILLA")
+        self.assertEqual(spec["image"], "itzg/minecraft-server:java8")
+        self.assertFalse(game["supportsMods"])
+
+    def test_minecraft_settings_reject_version_below_loader_minimum(self):
+        game = next(item for item in SERVER.GAMES if item["id"] == "minecraft")
+        SERVER.MINECRAFT_CATALOG_CACHE["payload"] = {
+            "versions": {
+                "vanilla": ["26.2", "1.16.5", "1.12.2"],
+                "forge": ["26.2", "1.16.5", "1.12.2"],
+                "fabric": ["26.2", "1.16.5", "1.14.4"],
+                "neoforge": ["26.2", "1.21.1", "1.20.1"]
+            },
+            "defaults": {"loader": "neoforge", "mcVersion": "26.2"}
+        }
+        SERVER.MINECRAFT_CATALOG_CACHE["time"] = time.monotonic()
+        with self.assertRaises(SERVER.DockerError):
+            SERVER.validate_settings(game, {"loader": "neoforge", "mcVersion": "1.16.5"})
+        values = SERVER.validate_settings(game, {"loader": "fabric", "mcVersion": "1.16.5", "maxPlayers": 8})
+        self.assertEqual(values["loader"], "fabric")
+        self.assertEqual(values["mcVersion"], "1.16.5")
 
 
 if __name__ == "__main__":

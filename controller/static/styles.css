@@ -783,6 +783,41 @@ button:disabled {
   margin-top: auto;
 }
 
+.add-game-setup {
+  display: grid;
+  gap: 14px;
+}
+
+.add-game-setup[hidden] {
+  display: none;
+}
+
+.setup-form {
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+  border-radius: 24px;
+}
+
+.setup-heading h2 {
+  margin: 4px 0 0;
+  font-size: 28px;
+  letter-spacing: -0.04em;
+}
+
+.setup-mods {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
 .game-card {
   --rotate-x: 0deg;
   --rotate-y: 0deg;

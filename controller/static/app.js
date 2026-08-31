@@ -9,6 +9,7 @@ const emptyLibrary = document.querySelector("#emptyLibrary");
 const libraryView = document.querySelector("#libraryView");
 const addGameView = document.querySelector("#addGameView");
 const catalogGrid = document.querySelector("#catalogGrid");
+const addGameSetup = document.querySelector("#addGameSetup");
 const openAddGameButton = document.querySelector("#openAddGameButton");
 const emptyAddGameButton = document.querySelector("#emptyAddGameButton");
 const backFromAddGameButton = document.querySelector("#backFromAddGameButton");
@@ -457,7 +458,7 @@ function renderCatalogGame(game) {
   const button = createElement(
     "button",
     `action-button${game.added ? " secondary" : ""}`,
-    game.added ? "从首页移除" : "添加到首页"
+    game.added ? "从首页移除" : game.setup ? "开始配置" : "添加到首页"
   );
   button.type = "button";
   button.addEventListener("click", () => updateLibraryGame(game, button));
@@ -490,6 +491,10 @@ async function loadCatalog() {
 }
 
 async function updateLibraryGame(game, button) {
+  if (!game.added && game.setup) {
+    await openGameSetup(game);
+    return;
+  }
   button.disabled = true;
   try {
     const payload = await api(`/api/game-library/${game.id}`, {
@@ -501,6 +506,181 @@ async function updateLibraryGame(game, button) {
     setMessage(error.message, true);
     button.disabled = false;
   }
+}
+
+function closeGameSetup() {
+  if (!addGameSetup) return;
+  addGameSetup.hidden = true;
+  addGameSetup.replaceChildren();
+  catalogGrid.hidden = false;
+}
+
+async function openGameSetup(game) {
+  catalogGrid.hidden = true;
+  addGameSetup.hidden = false;
+  addGameSetup.replaceChildren(createElement("p", "empty-state", "正在加载配置…"));
+  try {
+    const payload = await api(`/api/games/${game.id}/setup`);
+    renderGameSetup(game, payload);
+  } catch (error) {
+    addGameSetup.replaceChildren();
+    const back = createElement("button", "text-button", "返回游戏库");
+    back.type = "button";
+    back.addEventListener("click", closeGameSetup);
+    addGameSetup.append(createElement("p", "empty-state", `无法加载配置：${error.message}`), back);
+    setMessage(error.message, true);
+  }
+}
+
+function fillVersionSelect(select, versions, selected) {
+  const items = [...versions];
+  if (selected && !items.includes(selected)) items.unshift(selected);
+  select.replaceChildren();
+  for (const version of items) {
+    const option = document.createElement("option");
+    option.value = version;
+    option.textContent = version;
+    option.selected = version === selected;
+    select.append(option);
+  }
+}
+
+function bindMinecraftRuntimeFields(root, runtime) {
+  const loaderInput = root.querySelector('[name="loader"]');
+  const versionInput = root.querySelector('[name="mcVersion"]');
+  const modsPanel = root.querySelector("[data-setup-mods]");
+  if (!loaderInput || !versionInput || !runtime?.versions) return;
+  const sync = () => {
+    const loader = loaderInput.value;
+    const versions = runtime.versions[loader] || [];
+    fillVersionSelect(versionInput, versions, versionInput.value);
+    if (modsPanel) {
+      const info = (runtime.loaders || []).find((item) => item.id === loader);
+      modsPanel.hidden = info ? !info.mods : loader === "vanilla";
+    }
+  };
+  loaderInput.addEventListener("change", sync);
+  sync();
+}
+
+function collectSettingsFrom(root) {
+  const values = {};
+  for (const input of root.querySelectorAll("[data-setting-type]")) {
+    values[input.name] = input.dataset.settingType === "boolean" ? input.checked : input.value;
+  }
+  return values;
+}
+
+function renderGameSetup(game, payload) {
+  const form = createElement("form", "setup-form glass-panel");
+  const heading = createElement("div", "setup-heading");
+  heading.append(
+    createElement("p", "eyebrow", "初始化"),
+    createElement("h2", "", `配置 ${game.name}`),
+    createElement("p", "section-description", "先选择加载器和游戏版本，并可同时设置常用配置、上传 Mod。")
+  );
+  const fields = createElement("div", "settings-grid");
+  for (const setting of payload.settings || []) fields.append(renderSettingField(setting));
+  const mods = createElement("div", "setup-mods");
+  mods.dataset.setupMods = "true";
+  const pending = [];
+  const list = createElement("div", "mod-list");
+  const note = createElement("p", "mod-note", "可选。原版不显示此项；模组服可在创建时上传 .jar，启动后生效。");
+  const pick = createElement("button", "player-action", "添加 Mod");
+  pick.type = "button";
+  const renderPending = () => {
+    list.replaceChildren();
+    if (!pending.length) {
+      list.append(createElement("p", "empty-state", "还没有选择 Mod 文件。"));
+      return;
+    }
+    for (const [index, file] of pending.entries()) {
+      const row = createElement("article", "mod-row");
+      const identity = createElement("div", "mod-identity");
+      identity.append(createElement("strong", "", file.name), createElement("span", "", formatBytes(file.size)));
+      const remove = createElement("button", "player-action secondary", "删除");
+      remove.type = "button";
+      remove.addEventListener("click", () => {
+        pending.splice(index, 1);
+        renderPending();
+      });
+      row.append(identity, remove);
+      list.append(row);
+    }
+  };
+  pick.addEventListener("click", () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".jar,application/java-archive";
+    input.multiple = true;
+    input.hidden = true;
+    document.body.append(input);
+    input.addEventListener("change", () => {
+      for (const file of input.files || []) {
+        if (!file.name.toLowerCase().endsWith(".jar")) {
+          setMessage("只能添加 .jar 格式的 Mod 文件", true);
+          continue;
+        }
+        if (!pending.some((item) => item.name === file.name && item.size === file.size)) pending.push(file);
+      }
+      input.remove();
+      renderPending();
+    }, { once: true });
+    input.click();
+  });
+  const modsHeading = createElement("div", "panel-heading");
+  const modsTitle = document.createElement("div");
+  modsTitle.append(createElement("p", "eyebrow", "Mod"), createElement("h2", "", "初始化 Mod"));
+  modsHeading.append(modsTitle, pick);
+  mods.append(modsHeading, note, list);
+  renderPending();
+  const actions = createElement("div", "setup-actions");
+  const cancel = createElement("button", "action-button secondary", "返回游戏库");
+  cancel.type = "button";
+  cancel.addEventListener("click", closeGameSetup);
+  const submit = createElement("button", "primary-button", "添加到首页");
+  submit.type = "submit";
+  actions.append(cancel, submit);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    submit.disabled = true;
+    cancel.disabled = true;
+    try {
+      const settings = collectSettingsFrom(form);
+      const payloadResult = await api(`/api/game-library/${game.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings })
+      });
+      let uploaded = 0;
+      const loader = settings.loader || "neoforge";
+      const allowMods = payload.runtime?.loaders?.find((item) => item.id === loader)?.mods !== false && loader !== "vanilla";
+      if (allowMods) {
+        for (const file of pending) {
+          setMessage(`正在上传 ${file.name}`);
+          await api(`/api/games/${game.id}/mods/upload`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/java-archive",
+              "X-Mod-Filename": encodeURIComponent(file.name)
+            },
+            body: file
+          });
+          uploaded += 1;
+        }
+      }
+      setMessage(uploaded ? `${payloadResult.message}，并已上传 ${uploaded} 个 Mod` : payloadResult.message);
+      closeGameSetup();
+      await Promise.all([loadCatalog(), loadGames({ quiet: true })]);
+    } catch (error) {
+      setMessage(error.message, true);
+      submit.disabled = false;
+      cancel.disabled = false;
+    }
+  });
+  form.append(heading, fields, mods, actions);
+  addGameSetup.replaceChildren(form);
+  bindMinecraftRuntimeFields(form, payload.runtime);
 }
 
 function openAddGame() {
@@ -516,6 +696,7 @@ function openAddGame() {
 
 function closeAddGame() {
   const wasOpen = !addGameView.hidden;
+  closeGameSetup();
   addGameView.hidden = true;
   detailView.hidden = true;
   libraryView.hidden = false;
@@ -796,6 +977,7 @@ function renderSettingsPanel(game) {
   });
   form.append(heading, fields, note);
   panel.append(form);
+  bindMinecraftRuntimeFields(form, game.runtime);
   return panel;
 }
 
@@ -937,7 +1119,7 @@ function renderDetail(game) {
   const modsPanel = createElement("section", "detail-panel mods-panel glass-panel");
   const modsHeading = createElement("div", "panel-heading");
   const modsTitle = document.createElement("div");
-  modsTitle.append(createElement("p", "eyebrow", "NeoForge"), createElement("h2", "", "Mod 管理"));
+  modsTitle.append(createElement("p", "eyebrow", game.loader || "Mod"), createElement("h2", "", "Mod 管理"));
   const modsActions = createElement("div", "mods-heading-actions");
   modsActions.append(createElement("strong", "panel-count", String(game.mods?.length || 0)));
   const addMod = createElement("button", "player-action", "添加 Mod");
@@ -1070,7 +1252,7 @@ function renderDetail(game) {
   lowerGrid.append(playersPanel, worldPanel);
   lowerGrid.append(configurationPanel);
   if (["palworld", "terraria", "zomboid"].includes(game.detailType)) lowerGrid.append(announcePanel);
-  if (game.detailType === "minecraft") lowerGrid.append(modsPanel);
+  if (game.detailType === "minecraft" && game.supportsMods !== false) lowerGrid.append(modsPanel);
   lowerGrid.append(backupPanel, containerPanel);
   detailContent.replaceChildren(hero, metrics, lowerGrid);
   detailRenderSignature = getDetailSignature(game);

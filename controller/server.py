@@ -10,7 +10,11 @@ import struct
 import tarfile
 import threading
 import time
+import urllib.error
+import urllib.request
+import xml.etree.ElementTree as ET
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -612,6 +616,8 @@ def apply_setting_value(game, definition, value):
     if not spec:
         return
     target = definition.get("target") or {}
+    if target.get("kind") in ("minecraftRuntime", None) and definition.get("key") in ("loader", "mcVersion"):
+        return
     if target.get("kind") == "environment":
         spec.setdefault("environment", {})[target["name"]] = str(value)
         for name in definition.get("linkedEnvironment", []):
@@ -623,17 +629,288 @@ def apply_setting_value(game, definition, value):
             set_command_flag(command, "-world", f"/worlds/{value}.wld")
 
 
+MINECRAFT_LOADERS = {
+    "vanilla": {"type": "VANILLA", "label": "原版", "minVersion": "1.12.2", "mods": False},
+    "forge": {"type": "FORGE", "label": "Forge", "minVersion": "1.12.2", "mods": True},
+    "fabric": {"type": "FABRIC", "label": "Fabric", "minVersion": "1.14.4", "mods": True},
+    "neoforge": {"type": "NEOFORGE", "label": "NeoForge", "minVersion": "1.20.1", "mods": True}
+}
+MINECRAFT_FALLBACK_VERSIONS = [
+    "26.2", "26.1.2", "26.1.1", "26.1",
+    "1.21.11", "1.21.10", "1.21.8", "1.21.7", "1.21.6", "1.21.5", "1.21.4", "1.21.3", "1.21.1", "1.21",
+    "1.20.6", "1.20.4", "1.20.2", "1.20.1", "1.20",
+    "1.19.4", "1.19.2", "1.18.2", "1.17.1", "1.16.5", "1.15.2", "1.14.4", "1.12.2"
+]
+MINECRAFT_CATALOG_CACHE = {"time": 0.0, "payload": None}
+MINECRAFT_CATALOG_TTL = 3600
+LOADER_ENV_KEYS = ("NEOFORGE_VERSION", "NEOFORGE_INSTALLER", "FORGE_VERSION", "FABRIC_LOADER_VERSION")
+
+
+def mc_version_tuple(version):
+    parts = []
+    for item in str(version or "").split("."):
+        digits = "".join(character for character in item if character.isdigit())
+        parts.append(int(digits) if digits else 0)
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3])
+
+
+def version_at_least(version, minimum):
+    return mc_version_tuple(version) >= mc_version_tuple(minimum)
+
+
+def unique_versions(versions):
+    return list(dict.fromkeys(item for item in versions if item))
+
+
+def fetch_url(url, timeout=8):
+    request = urllib.request.Request(url, headers={"User-Agent": "nas-game-controller/1.0"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read()
+
+
+def fetch_json(url):
+    return json.loads(fetch_url(url).decode("utf-8"))
+
+
+def maven_versions(url):
+    root = ET.fromstring(fetch_url(url))
+    return [item.text.strip() for item in root.findall(".//version") if item.text]
+
+
+def vanilla_release_versions():
+    try:
+        payload = fetch_json("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")
+        versions = [item.get("id") for item in payload.get("versions", []) if item.get("type") == "release"]
+        if versions:
+            return unique_versions(versions)
+    except (OSError, TimeoutError, urllib.error.URLError, ValueError, json.JSONDecodeError):
+        pass
+    return list(MINECRAFT_FALLBACK_VERSIONS)
+
+
+def fabric_game_versions():
+    try:
+        payload = fetch_json("https://meta.fabricmc.net/v2/versions/game")
+        versions = [item.get("version") for item in payload if isinstance(item, dict) and item.get("stable")]
+        if versions:
+            return unique_versions(versions)
+    except (OSError, TimeoutError, urllib.error.URLError, ValueError, json.JSONDecodeError, TypeError):
+        pass
+    return [item for item in MINECRAFT_FALLBACK_VERSIONS if version_at_least(item, "1.14.4")]
+
+
+def neoforge_minecraft_version(neoforge_version):
+    value = str(neoforge_version or "")
+    if value.startswith("47."):
+        return "1.20.1"
+    parts = value.split(".")
+    if len(parts) < 2 or not parts[0].isdigit() or not parts[1].isdigit():
+        return None
+    major = int(parts[0])
+    minor = int(parts[1])
+    if major >= 25:
+        return f"{major}.{minor}"
+    if major >= 20:
+        return f"1.{major}" if minor == 0 else f"1.{major}.{minor}"
+    return None
+
+
+def neoforge_game_versions():
+    urls = (
+        "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml",
+        "https://maven.neoforged.net/net/neoforged/neoforge/maven-metadata.xml"
+    )
+    versions = []
+    for url in urls:
+        try:
+            mapped = [neoforge_minecraft_version(item) for item in maven_versions(url)]
+            versions = unique_versions(item for item in mapped if item)
+            if versions:
+                return versions
+        except (OSError, TimeoutError, urllib.error.URLError, ValueError, ET.ParseError):
+            continue
+    return [item for item in MINECRAFT_FALLBACK_VERSIONS if version_at_least(item, "1.20.1")]
+
+
+def forge_game_versions():
+    try:
+        raw = maven_versions("https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml")
+        versions = []
+        for item in raw:
+            if "-" not in item:
+                continue
+            minecraft_version = item.split("-", 1)[0]
+            if minecraft_version:
+                versions.append(minecraft_version)
+        versions = unique_versions(versions)
+        if versions:
+            return versions
+    except (OSError, TimeoutError, urllib.error.URLError, ValueError, ET.ParseError):
+        pass
+    return [item for item in MINECRAFT_FALLBACK_VERSIONS if version_at_least(item, "1.12.2")]
+
+
+def filter_loader_versions(versions, loader_id):
+    minimum = MINECRAFT_LOADERS[loader_id]["minVersion"]
+    filtered = [item for item in unique_versions(versions) if version_at_least(item, minimum)]
+    filtered.sort(key=mc_version_tuple, reverse=True)
+    return filtered
+
+
+def minecraft_catalog(force=False):
+    now = time.monotonic()
+    cached = MINECRAFT_CATALOG_CACHE.get("payload")
+    if not force and cached and now - MINECRAFT_CATALOG_CACHE["time"] < MINECRAFT_CATALOG_TTL:
+        return cached
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        vanilla_future = pool.submit(vanilla_release_versions)
+        forge_future = pool.submit(forge_game_versions)
+        fabric_future = pool.submit(fabric_game_versions)
+        neoforge_future = pool.submit(neoforge_game_versions)
+        vanilla = vanilla_future.result()
+        forge = forge_future.result()
+        fabric = fabric_future.result()
+        neoforge = neoforge_future.result()
+    vanilla_set = set(vanilla)
+    versions = {
+        "vanilla": filter_loader_versions(vanilla, "vanilla"),
+        "forge": filter_loader_versions(
+            [item for item in forge if item in vanilla_set or item in MINECRAFT_FALLBACK_VERSIONS],
+            "forge"
+        ),
+        "fabric": filter_loader_versions(
+            [item for item in fabric if item in vanilla_set or version_at_least(item, "1.14.4")],
+            "fabric"
+        ),
+        "neoforge": filter_loader_versions(
+            [item for item in neoforge if item in vanilla_set or version_at_least(item, "1.20.1")],
+            "neoforge"
+        )
+    }
+    for loader_id, items in versions.items():
+        if not items:
+            versions[loader_id] = filter_loader_versions(MINECRAFT_FALLBACK_VERSIONS, loader_id)
+    payload = {
+        "loaders": [
+            {
+                "id": loader_id,
+                "label": info["label"],
+                "minVersion": info["minVersion"],
+                "mods": info["mods"]
+            }
+            for loader_id, info in MINECRAFT_LOADERS.items()
+        ],
+        "versions": versions,
+        "defaults": {
+            "loader": "neoforge",
+            "mcVersion": (versions.get("neoforge") or ["26.2"])[0]
+        }
+    }
+    MINECRAFT_CATALOG_CACHE["time"] = now
+    MINECRAFT_CATALOG_CACHE["payload"] = payload
+    return payload
+
+
+def type_to_loader(value):
+    mapping = {info["type"]: loader_id for loader_id, info in MINECRAFT_LOADERS.items()}
+    current = str(value or "NEOFORGE").strip().upper()
+    return mapping.get(current, "neoforge")
+
+
+def minecraft_image_for_version(version):
+    major, minor, patch = mc_version_tuple(version)
+    if major >= 26:
+        tag = "java25"
+    elif major >= 25 or minor > 21 or minor == 21 or (minor == 20 and patch >= 5):
+        tag = "java21"
+    elif minor >= 17:
+        tag = "java17"
+    else:
+        tag = "java8"
+    return f"itzg/minecraft-server:{tag}"
+
+
+def current_minecraft_loader(game):
+    stored = read_settings_store().get(game.get("id"), {})
+    if isinstance(stored, dict) and stored.get("loader") in MINECRAFT_LOADERS:
+        return stored["loader"]
+    spec = primary_spec_from_game(game) or {}
+    return type_to_loader(spec.get("environment", {}).get("TYPE"))
+
+
+def current_minecraft_version(game):
+    stored = read_settings_store().get(game.get("id"), {})
+    if isinstance(stored, dict) and stored.get("mcVersion"):
+        return str(stored["mcVersion"])
+    spec = primary_spec_from_game(game) or {}
+    return str(spec.get("environment", {}).get("VERSION") or "26.2")
+
+
+def loader_version_choices(loader_id, fetch=True):
+    fallback = filter_loader_versions(MINECRAFT_FALLBACK_VERSIONS, loader_id)
+    cached = MINECRAFT_CATALOG_CACHE.get("payload")
+    if cached and cached.get("versions", {}).get(loader_id):
+        fallback = cached["versions"][loader_id]
+    if not fetch:
+        return fallback
+    return minecraft_catalog()["versions"].get(loader_id) or fallback
+
+
+def clamp_minecraft_version(loader_id, version, fetch=True):
+    allowed = loader_version_choices(loader_id, fetch=fetch)
+    if version in allowed:
+        return version
+    if re.fullmatch(r"\d+(?:\.\d+)+", str(version or "")) and version_at_least(version, MINECRAFT_LOADERS[loader_id]["minVersion"]):
+        return version
+    return allowed[0] if allowed else version
+
+
+def apply_minecraft_runtime(game, values=None):
+    if game.get("id") != "minecraft":
+        return
+    spec = primary_spec_from_game(game)
+    if not spec:
+        return
+    values = values if isinstance(values, dict) else {}
+    loader_id = values.get("loader") or current_minecraft_loader(game)
+    if loader_id not in MINECRAFT_LOADERS:
+        loader_id = "neoforge"
+    version = clamp_minecraft_version(
+        loader_id,
+        values.get("mcVersion") or current_minecraft_version(game),
+        fetch=False
+    )
+    info = MINECRAFT_LOADERS[loader_id]
+    environment = spec.setdefault("environment", {})
+    environment["TYPE"] = info["type"]
+    environment["VERSION"] = version
+    for key in LOADER_ENV_KEYS:
+        environment.pop(key, None)
+    if loader_id == "neoforge":
+        environment["NEOFORGE_VERSION"] = "latest"
+    elif loader_id == "forge":
+        environment["FORGE_VERSION"] = "RECOMMENDED"
+    spec["image"] = minecraft_image_for_version(version)
+    game["version"] = version
+    game["loader"] = info["label"]
+    game["description"] = "原版服务器" if loader_id == "vanilla" else f"{info['label']} 模组服务器"
+    game["supportsMods"] = info["mods"]
+
+
 def apply_persisted_settings(games):
     stored = read_settings_store()
     for game in games:
         values = stored.get(game.get("id"), {})
         definitions = {item.get("key"): item for item in game.get("settings", [])}
         if not isinstance(values, dict):
-            continue
+            values = {}
         for key, value in values.items():
             definition = definitions.get(key)
             if definition is not None:
                 apply_setting_value(game, definition, value)
+        apply_minecraft_runtime(game, values)
 
 
 GAMES = load_games()
@@ -686,6 +963,8 @@ def public_game(game):
         "endpoint": game.get("endpoint", ""),
         "port": int(game.get("port", 0) or 0),
         "detailType": game.get("detailType", "minecraft"),
+        "setup": bool(game.get("setup")),
+        "supportsMods": bool(game.get("supportsMods", game.get("id") == "minecraft")),
         "state": state,
         "health": primary.get("health") if primary else None,
         "containers": containers,
@@ -1090,7 +1369,9 @@ def minecraft_detail(game):
         },
         "backup": backup_info(game),
         "mods": mods_info(game),
-        "settings": settings_info(game)
+        "settings": settings_info(game),
+        "runtime": minecraft_catalog(),
+        "supportsMods": MINECRAFT_LOADERS.get(current_minecraft_loader(game), MINECRAFT_LOADERS["neoforge"])["mods"]
     })
     return public
 
@@ -1564,6 +1845,10 @@ def primary_spec(game):
 def setting_current_value(game, definition):
     spec = primary_spec(game) or {}
     target = definition.get("target") or {}
+    if definition.get("key") == "loader":
+        return current_minecraft_loader(game)
+    if definition.get("key") == "mcVersion":
+        return current_minecraft_version(game)
     if target.get("kind") == "environment":
         value = spec.get("environment", {}).get(target.get("name"), "")
     else:
@@ -1583,6 +1868,11 @@ def settings_info(game):
             if key not in ("target", "linkedFlags", "linkedEnvironment")
         }
         item["value"] = setting_current_value(game, definition)
+        if definition.get("key") == "mcVersion" and game.get("id") == "minecraft":
+            loader_id = current_minecraft_loader(game)
+            item["options"] = [{"value": version, "label": version} for version in loader_version_choices(loader_id)]
+            if item["value"] and item["value"] not in {option["value"] for option in item["options"]}:
+                item["options"].insert(0, {"value": item["value"], "label": item["value"]})
         if definition.get("type") == "password":
             target = definition.get("target") or {}
             spec = primary_spec(game) or {}
@@ -1637,6 +1927,21 @@ def validate_settings(game, submitted):
         if pattern and not re.fullmatch(pattern, value):
             raise DockerError(400, f"{definition['label']} 格式无效")
         normalized[key] = value
+    if game.get("id") == "minecraft" and ("loader" in normalized or "mcVersion" in normalized):
+        loader_id = normalized.get("loader") or current_minecraft_loader(game)
+        if loader_id not in MINECRAFT_LOADERS:
+            raise DockerError(400, "加载器不是允许的选项")
+        version = normalized.get("mcVersion") or current_minecraft_version(game)
+        allowed = loader_version_choices(loader_id)
+        if version not in allowed and not (
+            re.fullmatch(r"\d+(?:\.\d+)+", version)
+            and version_at_least(version, MINECRAFT_LOADERS[loader_id]["minVersion"])
+        ):
+            if "mcVersion" in normalized:
+                raise DockerError(400, f"游戏版本不在 {MINECRAFT_LOADERS[loader_id]['label']} 的支持范围内")
+            version = clamp_minecraft_version(loader_id, version)
+        normalized["loader"] = loader_id
+        normalized["mcVersion"] = version
     if not normalized:
         raise DockerError(400, "配置没有变化")
     return normalized
@@ -1660,6 +1965,7 @@ def persist_settings(game, values):
     for definition in game.get("settings", []):
         if definition.get("key") in values:
             apply_setting_value(game, definition, values[definition["key"]])
+    apply_minecraft_runtime(game, stored.get(game["id"], current))
     with STATE_LOCK:
         PALWORLD_DETAIL_CACHE.pop(game["id"], None)
         TERRARIA_DETAIL_CACHE.pop(game["id"], None)
@@ -2127,6 +2433,23 @@ class Handler(BaseHTTPRequestHandler):
         self.json_response(401, {"error": "登录会话已失效，请重新登录"})
         return False
 
+    def read_optional_json_body(self, maximum=16384):
+        try:
+            length = int(self.headers.get("Content-Length", "0") or 0)
+        except ValueError as exc:
+            raise DockerError(400, "请求体大小无效") from exc
+        if length <= 0:
+            return {}
+        if length > maximum:
+            raise DockerError(400, "请求体为空或过大")
+        try:
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise DockerError(400, "请求体不是有效的 JSON") from exc
+        if not isinstance(payload, dict):
+            raise DockerError(400, "请求体必须是对象")
+        return payload
+
     def read_json_body(self, maximum=4096):
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -2200,11 +2523,33 @@ class Handler(BaseHTTPRequestHandler):
                     "version": game.get("version", ""),
                     "loader": game.get("loader", ""),
                     "endpoint": game.get("endpoint", ""),
+                    "setup": bool(game.get("setup")),
+                    "supportsMods": bool(game.get("supportsMods", game.get("id") == "minecraft")),
                     "added": game["id"] in added
                 } for game in GAMES]
                 self.json_response(200, {"games": games})
             except RuntimeError as exc:
                 self.json_response(500, {"error": str(exc)})
+            return
+        setup_match = re.fullmatch(r"/api/games/([a-z0-9_-]+)/setup", path)
+        if setup_match:
+            if not self.require_auth():
+                return
+            game = GAME_INDEX.get(setup_match.group(1))
+            if game is None:
+                self.json_response(404, {"error": "游戏未注册"})
+                return
+            try:
+                payload = {"gameId": game["id"], "settings": settings_info(game)}
+                if game.get("id") == "minecraft":
+                    payload["runtime"] = minecraft_catalog()
+                    payload["supportsMods"] = MINECRAFT_LOADERS.get(
+                        current_minecraft_loader(game),
+                        MINECRAFT_LOADERS["neoforge"]
+                    )["mods"]
+                self.json_response(200, payload)
+            except (DockerError, RuntimeError) as exc:
+                self.json_response(getattr(exc, "status", 500), {"error": str(exc)})
             return
         detail_match = re.fullmatch(r"/api/games/([a-z0-9_-]+)/detail", path)
         if detail_match:
@@ -2274,6 +2619,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_response(404, {"error": "游戏未注册"})
                 return
             try:
+                payload = self.read_optional_json_body()
+                if payload.get("settings"):
+                    persist_settings(game, validate_settings(game, payload.get("settings")))
                 with STATE_LOCK:
                     game_ids = read_added_game_ids()
                     if game["id"] not in game_ids:
