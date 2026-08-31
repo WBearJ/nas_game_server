@@ -112,6 +112,7 @@
             </div>
           </div>
           <section id="catalogGrid" class="catalog-grid" aria-label="可添加的游戏" data-i18n-aria-label="可添加的游戏"></section>
+          <section id="addGameSetup" class="add-game-setup" hidden></section>
         </section>
 
         <section id="detailView" class="detail-view" hidden>
@@ -151,6 +152,34 @@
           </div>
           <pre id="logOutput" class="log-output" tabindex="0" data-i18n="正在读取日志…">正在读取日志…</pre>
           <p class="log-note" data-i18n="显示所选游戏的总控进度和容器最近 500 行日志，每 2 秒自动刷新。">显示所选游戏的总控进度和容器最近 500 行日志，每 2 秒自动刷新。</p>
+        </div>
+      </dialog>
+
+      <dialog id="uploadDialog" class="upload-dialog">
+        <div class="upload-shell">
+          <header class="upload-header">
+            <div>
+              <p class="eyebrow" data-i18n="Mod">Mod</p>
+              <h2 id="uploadTitle" data-i18n="正在上传 Mod">正在上传 Mod</h2>
+            </div>
+          </header>
+          <p id="uploadSummary" class="upload-summary"></p>
+          <div id="uploadList" class="upload-list"></div>
+          <div class="upload-actions">
+            <button id="closeUploadButton" type="button" class="primary-button compact-button" data-i18n="关闭">关闭</button>
+          </div>
+        </div>
+      </dialog>
+
+      <dialog id="confirmDialog" class="confirm-dialog">
+        <div class="confirm-shell">
+          <p class="eyebrow" data-i18n="请确认">请确认</p>
+          <h2 id="confirmTitle">删除游戏</h2>
+          <p id="confirmMessage" class="confirm-message"></p>
+          <div class="confirm-actions">
+            <button id="confirmCancel" type="button" class="action-button secondary" data-i18n="取消">取消</button>
+            <button id="confirmAccept" type="button" class="action-button danger" data-i18n="确认删除">确认删除</button>
+          </div>
         </div>
       </dialog>
     </main>

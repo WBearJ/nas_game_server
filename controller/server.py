@@ -5,12 +5,17 @@ import json
 import os
 import re
 import secrets
+import shutil
 import socket
 import struct
 import tarfile
 import threading
 import time
+import urllib.error
+import urllib.request
+import xml.etree.ElementTree as ET
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -50,6 +55,8 @@ OPERATION = {
     "finishedAt": None,
     "error": None
 }
+GAME_LAST_ERROR = {}
+START_VERIFY_SECONDS = 1
 
 
 def now_iso():
@@ -146,6 +153,52 @@ def update_operation(**changes):
 def operation_snapshot():
     with STATE_LOCK:
         return dict(OPERATION)
+
+
+def set_game_error(game_id, message):
+    with STATE_LOCK:
+        GAME_LAST_ERROR[game_id] = str(message)
+
+
+def clear_game_error(game_id):
+    with STATE_LOCK:
+        GAME_LAST_ERROR.pop(game_id, None)
+
+
+def game_error_text(game_id):
+    with STATE_LOCK:
+        return GAME_LAST_ERROR.get(game_id) or ""
+
+
+def last_log_excerpt(text, limit=240):
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    if not lines:
+        return ""
+    excerpt = lines[-1]
+    if len(excerpt) > limit:
+        return excerpt[-limit:]
+    return excerpt
+
+
+def ensure_start_succeeded(spec):
+    if START_VERIFY_SECONDS > 0:
+        time.sleep(START_VERIFY_SECONDS)
+    info = DOCKER.inspect(spec["name"])
+    if info is None:
+        raise DockerError(500, f"容器 {spec['name']} 启动后无法读取状态")
+    state = info.get("State") or {}
+    status = str(state.get("Status") or "")
+    if status not in ("exited", "dead"):
+        return
+    detail = str(state.get("Error") or "").strip()
+    if not detail:
+        try:
+            detail = last_log_excerpt(DOCKER.logs(spec["name"], tail=40))
+        except DockerError:
+            detail = ""
+    if not detail:
+        detail = f"容器启动后立即退出（退出码 {state.get('ExitCode', '?')}）"
+    raise DockerError(500, detail)
 
 
 class DockerError(RuntimeError):
@@ -506,6 +559,17 @@ def expand(value):
     return value
 
 
+def safe_host_path(relative):
+    relative_path = Path(relative)
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        raise DockerError(400, f"无效的项目内路径：{relative}")
+    root = HOST_PROJECT_MOUNT.resolve()
+    target = (root / relative_path).resolve()
+    if root not in target.parents:
+        raise DockerError(400, f"项目内路径越界：{relative}")
+    return target
+
+
 def load_games():
     with CONFIG_PATH.open("r", encoding="utf-8") as handle:
         config = expand(json.load(handle))
@@ -573,6 +637,16 @@ def added_games():
     return [game for game in GAMES if game["id"] in added]
 
 
+def available_library_games():
+    added = set(read_added_game_ids())
+    return [game for game in GAMES if game["id"] not in added]
+
+
+def ensure_game_not_added(game):
+    if game["id"] in set(read_added_game_ids()):
+        raise DockerError(409, "游戏已经添加，无需再次初始化")
+
+
 def read_settings_store():
     path = settings_store_path()
     if not path.is_file():
@@ -612,6 +686,8 @@ def apply_setting_value(game, definition, value):
     if not spec:
         return
     target = definition.get("target") or {}
+    if target.get("kind") in ("minecraftRuntime", None) and definition.get("key") in ("loader", "mcVersion"):
+        return
     if target.get("kind") == "environment":
         spec.setdefault("environment", {})[target["name"]] = str(value)
         for name in definition.get("linkedEnvironment", []):
@@ -623,17 +699,355 @@ def apply_setting_value(game, definition, value):
             set_command_flag(command, "-world", f"/worlds/{value}.wld")
 
 
+MINECRAFT_LOADERS = {
+    "vanilla": {"type": "VANILLA", "label": "原版", "minVersion": "1.12.2", "mods": False},
+    "forge": {"type": "FORGE", "label": "Forge", "minVersion": "1.12.2", "mods": True},
+    "fabric": {"type": "FABRIC", "label": "Fabric", "minVersion": "1.14.4", "mods": True},
+    "neoforge": {"type": "NEOFORGE", "label": "NeoForge", "minVersion": "1.20.1", "mods": True}
+}
+MINECRAFT_FALLBACK_VERSIONS = [
+    "26.2", "26.1.2", "26.1.1", "26.1",
+    "1.21.11", "1.21.10", "1.21.8", "1.21.7", "1.21.6", "1.21.5", "1.21.4", "1.21.3", "1.21.1", "1.21",
+    "1.20.6", "1.20.4", "1.20.2", "1.20.1", "1.20",
+    "1.19.4", "1.19.2", "1.18.2", "1.17.1", "1.16.5", "1.15.2", "1.14.4", "1.12.2"
+]
+MINECRAFT_CATALOG_CACHE = {"time": 0.0, "payload": None}
+MINECRAFT_CATALOG_TTL = 3600
+LOADER_ENV_KEYS = ("NEOFORGE_VERSION", "NEOFORGE_INSTALLER", "FORGE_VERSION", "FABRIC_LOADER_VERSION")
+
+
+def mc_version_tuple(version):
+    parts = []
+    for item in str(version or "").split("."):
+        digits = "".join(character for character in item if character.isdigit())
+        parts.append(int(digits) if digits else 0)
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3])
+
+
+def version_at_least(version, minimum):
+    return mc_version_tuple(version) >= mc_version_tuple(minimum)
+
+
+def unique_versions(versions):
+    return list(dict.fromkeys(item for item in versions if item))
+
+
+def fetch_url(url, timeout=8):
+    request = urllib.request.Request(url, headers={"User-Agent": "nas-game-controller/1.0"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read()
+
+
+def fetch_json(url):
+    return json.loads(fetch_url(url).decode("utf-8"))
+
+
+def maven_versions(url):
+    root = ET.fromstring(fetch_url(url))
+    return [item.text.strip() for item in root.findall(".//version") if item.text]
+
+
+def vanilla_release_versions():
+    try:
+        payload = fetch_json("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")
+        versions = [item.get("id") for item in payload.get("versions", []) if item.get("type") == "release"]
+        if versions:
+            return unique_versions(versions)
+    except (OSError, TimeoutError, urllib.error.URLError, ValueError, json.JSONDecodeError):
+        pass
+    return list(MINECRAFT_FALLBACK_VERSIONS)
+
+
+def fabric_game_versions():
+    try:
+        payload = fetch_json("https://meta.fabricmc.net/v2/versions/game")
+        versions = [item.get("version") for item in payload if isinstance(item, dict) and item.get("stable")]
+        if versions:
+            return unique_versions(versions)
+    except (OSError, TimeoutError, urllib.error.URLError, ValueError, json.JSONDecodeError, TypeError):
+        pass
+    return [item for item in MINECRAFT_FALLBACK_VERSIONS if version_at_least(item, "1.14.4")]
+
+
+def neoforge_minecraft_version(neoforge_version):
+    value = str(neoforge_version or "")
+    if value.startswith("47."):
+        return "1.20.1"
+    parts = value.split(".")
+    if len(parts) < 2 or not parts[0].isdigit() or not parts[1].isdigit():
+        return None
+    major = int(parts[0])
+    minor = int(parts[1])
+    if major >= 25:
+        return f"{major}.{minor}"
+    if major >= 20:
+        return f"1.{major}" if minor == 0 else f"1.{major}.{minor}"
+    return None
+
+
+def neoforge_game_versions():
+    urls = (
+        "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml",
+        "https://maven.neoforged.net/net/neoforged/neoforge/maven-metadata.xml"
+    )
+    versions = []
+    for url in urls:
+        try:
+            mapped = [neoforge_minecraft_version(item) for item in maven_versions(url)]
+            versions = unique_versions(item for item in mapped if item)
+            if versions:
+                return versions
+        except (OSError, TimeoutError, urllib.error.URLError, ValueError, ET.ParseError):
+            continue
+    return [item for item in MINECRAFT_FALLBACK_VERSIONS if version_at_least(item, "1.20.1")]
+
+
+def forge_game_versions():
+    try:
+        raw = maven_versions("https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml")
+        versions = []
+        for item in raw:
+            if "-" not in item:
+                continue
+            minecraft_version = item.split("-", 1)[0]
+            if minecraft_version:
+                versions.append(minecraft_version)
+        versions = unique_versions(versions)
+        if versions:
+            return versions
+    except (OSError, TimeoutError, urllib.error.URLError, ValueError, ET.ParseError):
+        pass
+    return [item for item in MINECRAFT_FALLBACK_VERSIONS if version_at_least(item, "1.12.2")]
+
+
+def filter_loader_versions(versions, loader_id):
+    minimum = MINECRAFT_LOADERS[loader_id]["minVersion"]
+    filtered = [item for item in unique_versions(versions) if version_at_least(item, minimum)]
+    filtered.sort(key=mc_version_tuple, reverse=True)
+    return filtered
+
+
+def minecraft_catalog(force=False):
+    now = time.monotonic()
+    cached = MINECRAFT_CATALOG_CACHE.get("payload")
+    if not force and cached and now - MINECRAFT_CATALOG_CACHE["time"] < MINECRAFT_CATALOG_TTL:
+        return cached
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        vanilla_future = pool.submit(vanilla_release_versions)
+        forge_future = pool.submit(forge_game_versions)
+        fabric_future = pool.submit(fabric_game_versions)
+        neoforge_future = pool.submit(neoforge_game_versions)
+        vanilla = vanilla_future.result()
+        forge = forge_future.result()
+        fabric = fabric_future.result()
+        neoforge = neoforge_future.result()
+    vanilla_set = set(vanilla)
+    versions = {
+        "vanilla": filter_loader_versions(vanilla, "vanilla"),
+        "forge": filter_loader_versions(
+            [item for item in forge if item in vanilla_set or item in MINECRAFT_FALLBACK_VERSIONS],
+            "forge"
+        ),
+        "fabric": filter_loader_versions(
+            [item for item in fabric if item in vanilla_set or version_at_least(item, "1.14.4")],
+            "fabric"
+        ),
+        "neoforge": filter_loader_versions(
+            [item for item in neoforge if item in vanilla_set or version_at_least(item, "1.20.1")],
+            "neoforge"
+        )
+    }
+    for loader_id, items in versions.items():
+        if not items:
+            versions[loader_id] = filter_loader_versions(MINECRAFT_FALLBACK_VERSIONS, loader_id)
+    payload = {
+        "loaders": [
+            {
+                "id": loader_id,
+                "label": info["label"],
+                "minVersion": info["minVersion"],
+                "mods": info["mods"]
+            }
+            for loader_id, info in MINECRAFT_LOADERS.items()
+        ],
+        "versions": versions,
+        "defaults": {
+            "loader": "neoforge",
+            "mcVersion": (versions.get("neoforge") or ["26.2"])[0]
+        }
+    }
+    MINECRAFT_CATALOG_CACHE["time"] = now
+    MINECRAFT_CATALOG_CACHE["payload"] = payload
+    return payload
+
+
+def type_to_loader(value):
+    mapping = {info["type"]: loader_id for loader_id, info in MINECRAFT_LOADERS.items()}
+    current = str(value or "NEOFORGE").strip().upper()
+    return mapping.get(current, "neoforge")
+
+
+def minecraft_image_for_version(version):
+    major, minor, patch = mc_version_tuple(version)
+    if major >= 26:
+        tag = "java25"
+    elif major >= 25 or minor > 21 or minor == 21 or (minor == 20 and patch >= 5):
+        tag = "java21"
+    elif minor >= 17:
+        tag = "java17"
+    else:
+        tag = "java8"
+    return f"itzg/minecraft-server:{tag}"
+
+
+def current_minecraft_loader(game):
+    stored = read_settings_store().get(game.get("id"), {})
+    if isinstance(stored, dict) and stored.get("loader") in MINECRAFT_LOADERS:
+        return stored["loader"]
+    spec = primary_spec_from_game(game) or {}
+    return type_to_loader(spec.get("environment", {}).get("TYPE"))
+
+
+def current_minecraft_version(game):
+    stored = read_settings_store().get(game.get("id"), {})
+    if isinstance(stored, dict) and stored.get("mcVersion"):
+        return str(stored["mcVersion"])
+    spec = primary_spec_from_game(game) or {}
+    return str(spec.get("environment", {}).get("VERSION") or "26.2")
+
+
+def loader_version_choices(loader_id, fetch=True):
+    fallback = filter_loader_versions(MINECRAFT_FALLBACK_VERSIONS, loader_id)
+    cached = MINECRAFT_CATALOG_CACHE.get("payload")
+    if cached and cached.get("versions", {}).get(loader_id):
+        fallback = cached["versions"][loader_id]
+    if not fetch:
+        return fallback
+    return minecraft_catalog()["versions"].get(loader_id) or fallback
+
+
+def clamp_minecraft_version(loader_id, version, fetch=True):
+    allowed = loader_version_choices(loader_id, fetch=fetch)
+    if version in allowed:
+        return version
+    if re.fullmatch(r"\d+(?:\.\d+)+", str(version or "")) and version_at_least(version, MINECRAFT_LOADERS[loader_id]["minVersion"]):
+        return version
+    return allowed[0] if allowed else version
+
+
+NEOFORGE_INSTALLER_FILENAME = re.compile(
+    r"^neoforge[-_](.+?)[-_]installer(?:\s*\(\d+\))?\.jar$",
+    re.IGNORECASE
+)
+
+
+def version_parts(version):
+    parts = []
+    for item in str(version or "").split("."):
+        digits = "".join(character for character in item if character.isdigit())
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts)
+
+
+def installer_directory(relative="minecraft/installer"):
+    if not HOST_PROJECT_MOUNT.is_dir():
+        return None
+    try:
+        directory = safe_host_path(relative)
+    except DockerError:
+        return None
+    if not directory.is_dir():
+        return None
+    return directory
+
+
+def installer_file_names(relative="minecraft/installer"):
+    directory = installer_directory(relative)
+    if directory is None:
+        return []
+    return sorted(path.name for path in directory.iterdir() if path.is_file())
+
+
+def local_neoforge_installer(mc_version, relative="minecraft/installer"):
+    directory = installer_directory(relative)
+    if directory is None:
+        return None
+    matching = []
+    available = []
+    for path in directory.iterdir():
+        if not path.is_file():
+            continue
+        parsed = NEOFORGE_INSTALLER_FILENAME.fullmatch(path.name)
+        if not parsed:
+            continue
+        nf_version = parsed.group(1)
+        item = (version_parts(nf_version), nf_version, path.name)
+        available.append(item)
+        if neoforge_minecraft_version(nf_version) == str(mc_version):
+            matching.append(item)
+    chosen = matching or available
+    if not chosen:
+        return None
+    chosen.sort()
+    _, nf_version, name = chosen[-1]
+    return nf_version, f"/installer/{name}"
+
+
+def apply_minecraft_runtime(game, values=None):
+    if game.get("id") != "minecraft":
+        return
+    spec = primary_spec_from_game(game)
+    if not spec:
+        return
+    values = values if isinstance(values, dict) else {}
+    loader_id = values.get("loader") or current_minecraft_loader(game)
+    if loader_id not in MINECRAFT_LOADERS:
+        loader_id = "neoforge"
+    version = clamp_minecraft_version(
+        loader_id,
+        values.get("mcVersion") or current_minecraft_version(game),
+        fetch=False
+    )
+    info = MINECRAFT_LOADERS[loader_id]
+    environment = spec.setdefault("environment", {})
+    environment["TYPE"] = info["type"]
+    environment["VERSION"] = version
+    for key in LOADER_ENV_KEYS:
+        environment.pop(key, None)
+    if loader_id == "neoforge":
+        local = local_neoforge_installer(version)
+        if local:
+            environment["NEOFORGE_VERSION"] = local[0]
+            environment["NEOFORGE_INSTALLER"] = local[1]
+            mapped = neoforge_minecraft_version(local[0])
+            if mapped:
+                environment["VERSION"] = mapped
+                version = mapped
+        else:
+            environment["NEOFORGE_VERSION"] = "latest"
+    elif loader_id == "forge":
+        environment["FORGE_VERSION"] = "RECOMMENDED"
+    spec["image"] = minecraft_image_for_version(version)
+    game["version"] = version
+    game["loader"] = info["label"]
+    game["description"] = "原版服务器" if loader_id == "vanilla" else f"{info['label']} 模组服务器"
+    game["supportsMods"] = info["mods"]
+
+
 def apply_persisted_settings(games):
     stored = read_settings_store()
     for game in games:
         values = stored.get(game.get("id"), {})
         definitions = {item.get("key"): item for item in game.get("settings", [])}
         if not isinstance(values, dict):
-            continue
+            values = {}
         for key, value in values.items():
             definition = definitions.get(key)
             if definition is not None:
                 apply_setting_value(game, definition, value)
+        apply_minecraft_runtime(game, values)
 
 
 GAMES = load_games()
@@ -686,22 +1100,14 @@ def public_game(game):
         "endpoint": game.get("endpoint", ""),
         "port": int(game.get("port", 0) or 0),
         "detailType": game.get("detailType", "minecraft"),
+        "setup": bool(game.get("setup")),
+        "supportsMods": bool(game.get("supportsMods", game.get("id") == "minecraft")),
         "state": state,
         "health": primary.get("health") if primary else None,
+        "error": game_error_text(game["id"]),
         "containers": containers,
         "metrics": game_metrics(game, containers)
     }
-
-
-def safe_host_path(relative):
-    relative_path = Path(relative)
-    if relative_path.is_absolute() or ".." in relative_path.parts:
-        raise DockerError(400, f"无效的项目内路径：{relative}")
-    root = HOST_PROJECT_MOUNT.resolve()
-    target = (root / relative_path).resolve()
-    if root not in target.parents:
-        raise DockerError(400, f"项目内路径越界：{relative}")
-    return target
 
 
 def directory_size(path):
@@ -961,6 +1367,32 @@ def minecraft_players(game):
     }
 
 
+def minecraft_access_lists(game):
+    def entries(relative, include_reason=False):
+        result = []
+        for item in read_json_file(relative, []):
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "")).strip()
+            if not re.fullmatch(r"[A-Za-z0-9_]{1,16}", name):
+                continue
+            entry = {"name": name, "uuid": item.get("uuid")}
+            if include_reason:
+                entry.update({
+                    "reason": item.get("reason"),
+                    "created": item.get("created"),
+                    "expires": item.get("expires")
+                })
+            result.append(entry)
+        return sorted(result, key=lambda entry: entry["name"].lower())
+
+    return {
+        "operators": entries(game.get("opsPath")),
+        "whitelist": entries(game.get("whitelistPath")),
+        "bannedPlayers": entries(game.get("bannedPlayersPath"), include_reason=True)
+    }
+
+
 def backup_info(game):
     config = game.get("backup") or {}
     if not config or not HOST_PROJECT_MOUNT.is_dir():
@@ -1090,7 +1522,11 @@ def minecraft_detail(game):
         },
         "backup": backup_info(game),
         "mods": mods_info(game),
-        "settings": settings_info(game)
+        "accessLists": minecraft_access_lists(game),
+        "runtimeLocked": minecraft_runtime_locked(game),
+        "settings": settings_info(game),
+        "runtime": minecraft_catalog(),
+        "supportsMods": MINECRAFT_LOADERS.get(current_minecraft_loader(game), MINECRAFT_LOADERS["neoforge"])["mods"]
     })
     return public
 
@@ -1519,9 +1955,41 @@ def prepare_host_paths(game):
             raise DockerError(500, f"缺少项目文件 {relative}；请重新上传完整项目后重试")
 
 
+def container_env_map(info):
+    result = {}
+    for item in (info.get("Config") or {}).get("Env") or []:
+        if "=" in str(item):
+            key, value = str(item).split("=", 1)
+            result[key] = value
+    return result
+
+
+def container_needs_recreate(spec, info):
+    current = container_env_map(info)
+    for key, value in (spec.get("environment") or {}).items():
+        if current.get(key) != str(value):
+            return True
+    return False
+
+
 def ensure_game(game):
     update_operation(message="正在检查 NAS 数据目录")
     prepare_host_paths(game)
+    apply_minecraft_runtime(game, read_settings_store().get(game.get("id"), {}))
+    spec = primary_spec_from_game(game) or {}
+    environment = spec.get("environment") or {}
+    if environment.get("TYPE") == "NEOFORGE":
+        installer = environment.get("NEOFORGE_INSTALLER")
+        if installer:
+            record_log(f"使用本地 NeoForge 安装器 {installer}", game["id"])
+        else:
+            names = installer_file_names()
+            record_log(
+                "未找到可用的 neoforge-*-installer.jar，容器将访问 maven.neoforged.net。"
+                f" 当前 installer 目录文件：{', '.join(names) if names else '空'}",
+                game["id"],
+                "error"
+            )
     for requirement in game.get("requiredEnvironment", []):
         value = str(os.environ.get(requirement.get("name", ""), "")).strip()
         invalid = {str(item) for item in requirement.get("invalid", [])}
@@ -1538,7 +2006,18 @@ def ensure_game(game):
             record_log(f"容器 {spec['name']} 创建完成", game["id"])
         else:
             assert_managed(game, spec, info)
-            record_log(f"容器 {spec['name']} 已存在，继续使用", game["id"])
+            if container_needs_recreate(spec, info):
+                status = (info.get("State") or {}).get("Status")
+                if status in ("running", "paused", "restarting"):
+                    update_operation(message=f"正在停止 {spec['name']} 以便应用新配置")
+                    DOCKER.stop(spec["name"], spec.get("stopTimeout", 120))
+                update_operation(message=f"正在按新配置重建 {spec['name']}")
+                record_log(f"容器 {spec['name']} 环境已变化，正在重建并保留数据目录", game["id"])
+                DOCKER.remove(spec["name"])
+                DOCKER.create_container(game, spec)
+                record_log(f"容器 {spec['name']} 已按新配置重建", game["id"])
+            else:
+                record_log(f"容器 {spec['name']} 已存在，继续使用", game["id"])
         DOCKER.disable_auto_restart(spec["name"])
 
 
@@ -1561,9 +2040,32 @@ def primary_spec(game):
     )
 
 
+def minecraft_runtime_locked(game):
+    if game.get("id") != "minecraft":
+        return False
+    properties_path = game.get("propertiesPath")
+    if properties_path and HOST_PROJECT_MOUNT.is_dir():
+        try:
+            if safe_host_path(properties_path).is_file():
+                return True
+        except DockerError:
+            pass
+    spec = primary_spec(game)
+    if not spec:
+        return False
+    try:
+        return DOCKER.inspect(spec["name"]) is not None
+    except DockerError:
+        return False
+
+
 def setting_current_value(game, definition):
     spec = primary_spec(game) or {}
     target = definition.get("target") or {}
+    if definition.get("key") == "loader":
+        return current_minecraft_loader(game)
+    if definition.get("key") == "mcVersion":
+        return current_minecraft_version(game)
     if target.get("kind") == "environment":
         value = spec.get("environment", {}).get(target.get("name"), "")
     else:
@@ -1577,12 +2079,22 @@ def setting_current_value(game, definition):
 
 def settings_info(game):
     result = []
+    runtime_locked = minecraft_runtime_locked(game)
     for definition in game.get("settings", []):
         item = {
             key: value for key, value in definition.items()
             if key not in ("target", "linkedFlags", "linkedEnvironment")
         }
         item["value"] = setting_current_value(game, definition)
+        if runtime_locked and definition.get("key") in ("loader", "mcVersion"):
+            item["locked"] = True
+            item["hint"] = "服务器初始化后不可修改；如需更换，请删除服务器数据后重新初始化"
+        if definition.get("key") == "mcVersion" and game.get("id") == "minecraft":
+            loader_id = current_minecraft_loader(game)
+            versions = [item["value"]] if item.get("locked") else loader_version_choices(loader_id)
+            item["options"] = [{"value": version, "label": version} for version in versions if version]
+            if item["value"] and item["value"] not in {option["value"] for option in item["options"]}:
+                item["options"].insert(0, {"value": item["value"], "label": item["value"]})
         if definition.get("type") == "password":
             target = definition.get("target") or {}
             spec = primary_spec(game) or {}
@@ -1603,6 +2115,8 @@ def validate_settings(game, submitted):
     unknown = set(submitted) - set(definitions)
     if unknown:
         raise DockerError(400, f"包含不支持的配置：{', '.join(sorted(unknown))}")
+    if minecraft_runtime_locked(game) and set(submitted) & {"loader", "mcVersion"}:
+        raise DockerError(409, "服务器初始化后不能修改加载器或游戏版本")
     normalized = {}
     for key, raw in submitted.items():
         definition = definitions[key]
@@ -1637,33 +2151,69 @@ def validate_settings(game, submitted):
         if pattern and not re.fullmatch(pattern, value):
             raise DockerError(400, f"{definition['label']} 格式无效")
         normalized[key] = value
+    if game.get("id") == "minecraft" and ("loader" in normalized or "mcVersion" in normalized):
+        loader_id = normalized.get("loader") or current_minecraft_loader(game)
+        if loader_id not in MINECRAFT_LOADERS:
+            raise DockerError(400, "加载器不是允许的选项")
+        version = normalized.get("mcVersion") or current_minecraft_version(game)
+        allowed = loader_version_choices(loader_id)
+        if version not in allowed and not (
+            re.fullmatch(r"\d+(?:\.\d+)+", version)
+            and version_at_least(version, MINECRAFT_LOADERS[loader_id]["minVersion"])
+        ):
+            if "mcVersion" in normalized:
+                raise DockerError(400, f"游戏版本不在 {MINECRAFT_LOADERS[loader_id]['label']} 的支持范围内")
+            version = clamp_minecraft_version(loader_id, version)
+        normalized["loader"] = loader_id
+        normalized["mcVersion"] = version
     if not normalized:
         raise DockerError(400, "配置没有变化")
     return normalized
 
 
-def persist_settings(game, values):
+def write_settings_store_update(game_id, values):
     path = settings_store_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         stored = read_settings_store()
-        current = stored.get(game["id"], {})
+        current = stored.get(game_id, {})
         if not isinstance(current, dict):
             current = {}
         current.update(values)
-        stored[game["id"]] = current
+        stored[game_id] = current
         temporary = path.with_name(f".{path.name}.{threading.get_ident()}.tmp")
         temporary.write_text(json.dumps(stored, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         os.replace(temporary, path)
     except OSError as exc:
         raise DockerError(500, f"无法保存网页配置：{exc}") from exc
+    return stored
+
+
+def persist_settings(game, values):
+    stored = write_settings_store_update(game["id"], values)
     for definition in game.get("settings", []):
         if definition.get("key") in values:
             apply_setting_value(game, definition, values[definition["key"]])
+    apply_minecraft_runtime(game, stored.get(game["id"], {}))
     with STATE_LOCK:
         PALWORLD_DETAIL_CACHE.pop(game["id"], None)
         TERRARIA_DETAIL_CACHE.pop(game["id"], None)
         ZOMBOID_DETAIL_CACHE.pop(game["id"], None)
+
+
+def clear_game_settings(game):
+    path = settings_store_path()
+    stored = read_settings_store()
+    if game["id"] not in stored:
+        return
+    stored.pop(game["id"], None)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f".{path.name}.{threading.get_ident()}.tmp")
+        temporary.write_text(json.dumps(stored, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.replace(temporary, path)
+    except OSError as exc:
+        raise DockerError(500, f"无法保存网页配置：{exc}") from exc
 
 
 def send_console(game, command):
@@ -1828,6 +2378,7 @@ def run_action(game, action):
             record_log(f"正在启动容器 {spec['name']}", game["id"])
             DOCKER.start(spec["name"])
             record_log(f"容器 {spec['name']} 启动指令已发送", game["id"])
+            ensure_start_succeeded(spec)
     elif action == "stop":
         for spec in reversed(specs):
             info = DOCKER.inspect(spec["name"])
@@ -1854,6 +2405,7 @@ def run_action(game, action):
             record_log(f"正在启动容器 {spec['name']}", game["id"])
             DOCKER.start(spec["name"])
             record_log(f"容器 {spec['name']} 启动指令已发送", game["id"])
+            ensure_start_succeeded(spec)
     elif action == "backup":
         create_backup(game)
     elif action == "save":
@@ -1863,19 +2415,78 @@ def run_action(game, action):
         raise ValueError("不支持的操作")
 
 
+def delete_game_files(game):
+    relatives = []
+    for relative in game.get("hostDirectories", []):
+        relatives.append(relative)
+    backup_directory = (game.get("backup") or {}).get("directory")
+    if backup_directory:
+        relatives.append(backup_directory)
+    seen = set()
+    for relative in relatives:
+        if relative in seen:
+            continue
+        seen.add(relative)
+        path = safe_host_path(relative)
+        if not path.exists():
+            continue
+        try:
+            if path.is_symlink() or path.is_file():
+                path.unlink()
+            elif path.is_dir():
+                shutil.rmtree(path)
+        except OSError as exc:
+            raise DockerError(500, f"无法删除 {relative}：{exc}") from exc
+        record_log(f"已删除游戏文件：{relative}", game["id"])
+    with STATE_LOCK:
+        METRICS_CACHE.pop(game["id"], None)
+        RUNTIME_METRICS_CACHE.pop(game["id"], None)
+        PLAYER_EVENTS_CACHE.pop(game["id"], None)
+        PALWORLD_DETAIL_CACHE.pop(game["id"], None)
+        TERRARIA_DETAIL_CACHE.pop(game["id"], None)
+        ZOMBOID_DETAIL_CACHE.pop(game["id"], None)
+        GAME_LAST_ERROR.pop(game["id"], None)
+
+
+def purge_game(game):
+    specs = sorted(game.get("containers", []), key=lambda item: item.get("startOrder", 0), reverse=True)
+    for spec in specs:
+        info = DOCKER.inspect(spec["name"])
+        if info is None:
+            continue
+        assert_managed(game, spec, info)
+        if info.get("State", {}).get("Status") == "running":
+            update_operation(message=f"正在停止 {spec['name']}")
+            record_log(f"正在停止容器 {spec['name']}", game["id"])
+            DOCKER.disable_auto_restart(spec["name"])
+            DOCKER.stop(spec["name"], spec.get("stopTimeout", 120))
+        update_operation(message=f"正在删除容器 {spec['name']}")
+        record_log(f"正在删除容器 {spec['name']}", game["id"])
+        DOCKER.remove(spec["name"])
+        record_log(f"容器 {spec['name']} 已删除", game["id"])
+    update_operation(message=f"正在删除 {game['name']} 的世界、模组和备份")
+    delete_game_files(game)
+    clear_game_settings(game)
+    with STATE_LOCK:
+        persist_added_game_ids([game_id for game_id in read_added_game_ids() if game_id != game["id"]])
+
+
 ACTION_LABELS = {
     "start": "启动",
     "stop": "停止",
     "restart": "重启",
     "backup": "备份",
     "save": "保存世界",
-    "settings": "应用配置"
+    "settings": "应用配置",
+    "delete": "删除"
 }
 
 
 def action_worker(game, action):
     label = ACTION_LABELS[action]
     try:
+        if action in ("start", "restart"):
+            clear_game_error(game["id"])
         record_log(f"开始{label} {game['name']}", game["id"])
         run_action(game, action)
         message = f"{game['name']} {label}操作已完成"
@@ -1886,9 +2497,13 @@ def action_worker(game, action):
             finishedAt=now_iso(),
             error=None
         )
+        if action in ("start", "restart"):
+            clear_game_error(game["id"])
     except (DockerError, KeyError, ValueError, RuntimeError) as exc:
         message = f"{game['name']} {label}失败：{exc}"
         record_log(message, game["id"], "error")
+        if action in ("start", "restart"):
+            set_game_error(game["id"], f"{label}失败：{exc}")
         update_operation(
             running=False,
             message=message,
@@ -1898,6 +2513,8 @@ def action_worker(game, action):
     except Exception as exc:
         message = f"{game['name']} {label}发生未预期错误：{exc}"
         record_log(message, game["id"], "error")
+        if action in ("start", "restart"):
+            set_game_error(game["id"], f"{label}失败：{exc}")
         update_operation(
             running=False,
             message=message,
@@ -1944,6 +2561,25 @@ def settings_worker(game):
         update_operation(running=False, message=message, finishedAt=now_iso(), error=None)
     except Exception as exc:
         message = f"{game['name']} 配置应用失败：{exc}"
+        record_log(message, game["id"], "error")
+        update_operation(running=False, message=message, finishedAt=now_iso(), error=str(exc))
+    finally:
+        ACTION_LOCK.release()
+
+
+def purge_worker(game):
+    try:
+        record_log(f"开始删除 {game['name']}", game["id"])
+        purge_game(game)
+        message = f"已删除 {game['name']}，世界、模组和备份已清除"
+        record_log(message, game["id"])
+        update_operation(running=False, message=message, finishedAt=now_iso(), error=None)
+    except (DockerError, KeyError, ValueError, RuntimeError) as exc:
+        message = f"{game['name']} 删除失败：{exc}"
+        record_log(message, game["id"], "error")
+        update_operation(running=False, message=message, finishedAt=now_iso(), error=str(exc))
+    except Exception as exc:
+        message = f"{game['name']} 删除发生未预期错误：{exc}"
         record_log(message, game["id"], "error")
         update_operation(running=False, message=message, finishedAt=now_iso(), error=str(exc))
     finally:
@@ -2008,7 +2644,9 @@ PLAYER_ACTIONS = {
     "op": lambda name: f"op {name}",
     "deop": lambda name: f"deop {name}",
     "whitelist-add": lambda name: f"whitelist add {name}",
-    "whitelist-remove": lambda name: f"whitelist remove {name}"
+    "whitelist-remove": lambda name: f"whitelist remove {name}",
+    "ban": lambda name: f"ban {name} 由服务器管理员加入黑名单",
+    "pardon": lambda name: f"pardon {name}"
 }
 
 
@@ -2024,7 +2662,9 @@ def run_player_action(game, player_name, action):
         "op": "授予管理员",
         "deop": "取消管理员",
         "whitelist-add": "加入白名单",
-        "whitelist-remove": "移出白名单"
+        "whitelist-remove": "移出白名单",
+        "ban": "加入黑名单",
+        "pardon": "移出黑名单"
     }
     return f"已对 {player_name} 执行：{labels[action]}"
 
@@ -2127,6 +2767,23 @@ class Handler(BaseHTTPRequestHandler):
         self.json_response(401, {"error": "登录会话已失效，请重新登录"})
         return False
 
+    def read_optional_json_body(self, maximum=16384):
+        try:
+            length = int(self.headers.get("Content-Length", "0") or 0)
+        except ValueError as exc:
+            raise DockerError(400, "请求体大小无效") from exc
+        if length <= 0:
+            return {}
+        if length > maximum:
+            raise DockerError(400, "请求体为空或过大")
+        try:
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise DockerError(400, "请求体不是有效的 JSON") from exc
+        if not isinstance(payload, dict):
+            raise DockerError(400, "请求体必须是对象")
+        return payload
+
     def read_json_body(self, maximum=4096):
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -2191,7 +2848,6 @@ class Handler(BaseHTTPRequestHandler):
             if not self.require_auth():
                 return
             try:
-                added = set(read_added_game_ids())
                 games = [{
                     "id": game["id"],
                     "name": game["name"],
@@ -2200,11 +2856,34 @@ class Handler(BaseHTTPRequestHandler):
                     "version": game.get("version", ""),
                     "loader": game.get("loader", ""),
                     "endpoint": game.get("endpoint", ""),
-                    "added": game["id"] in added
-                } for game in GAMES]
+                    "setup": bool(game.get("setup")),
+                    "supportsMods": bool(game.get("supportsMods", game.get("id") == "minecraft")),
+                    "added": False
+                } for game in available_library_games()]
                 self.json_response(200, {"games": games})
             except RuntimeError as exc:
                 self.json_response(500, {"error": str(exc)})
+            return
+        setup_match = re.fullmatch(r"/api/games/([a-z0-9_-]+)/setup", path)
+        if setup_match:
+            if not self.require_auth():
+                return
+            game = GAME_INDEX.get(setup_match.group(1))
+            if game is None:
+                self.json_response(404, {"error": "游戏未注册"})
+                return
+            try:
+                ensure_game_not_added(game)
+                payload = {
+                    "gameId": game["id"],
+                    "settings": settings_info(game),
+                    "supportsMods": game.get("id") == "minecraft"
+                }
+                if game.get("id") == "minecraft":
+                    payload["runtime"] = minecraft_catalog()
+                self.json_response(200, payload)
+            except (DockerError, RuntimeError) as exc:
+                self.json_response(getattr(exc, "status", 500), {"error": str(exc)})
             return
         detail_match = re.fullmatch(r"/api/games/([a-z0-9_-]+)/detail", path)
         if detail_match:
@@ -2274,6 +2953,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_response(404, {"error": "游戏未注册"})
                 return
             try:
+                ensure_game_not_added(game)
+                payload = self.read_optional_json_body()
+                if payload.get("settings"):
+                    persist_settings(game, validate_settings(game, payload.get("settings")))
                 with STATE_LOCK:
                     game_ids = read_added_game_ids()
                     if game["id"] not in game_ids:
@@ -2350,7 +3033,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_response(exc.status, {"error": str(exc)})
             return
         player_match = re.fullmatch(
-            r"/api/games/([a-z0-9_-]+)/players/([A-Za-z0-9_]{1,16})/(kick|op|deop|whitelist-add|whitelist-remove)",
+            r"/api/games/([a-z0-9_-]+)/players/([A-Za-z0-9_]{1,16})/(kick|op|deop|whitelist-add|whitelist-remove|ban|pardon)",
             path
         )
         if player_match:
@@ -2492,6 +3175,48 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_response(200, {"message": f"已移除 {game['name']}，服务器数据未删除"})
             except (DockerError, RuntimeError) as exc:
                 self.json_response(getattr(exc, "status", 500), {"error": str(exc)})
+            return
+        game_match = re.fullmatch(r"/api/games/([a-z0-9_-]+)", path)
+        if game_match:
+            game = GAME_INDEX.get(game_match.group(1))
+            if game is None:
+                self.json_response(404, {"error": "游戏未注册"})
+                return
+            if not ACTION_LOCK.acquire(blocking=False):
+                operation = operation_snapshot()
+                self.json_response(409, {
+                    "error": f"另一个操作正在执行：{operation.get('message', '请稍后再试')}",
+                    "operation": operation
+                })
+                return
+            operation = update_operation(
+                running=True,
+                gameId=game["id"],
+                gameName=game["name"],
+                action="delete",
+                message=f"准备删除 {game['name']}",
+                startedAt=now_iso(),
+                finishedAt=None,
+                error=None
+            )
+            worker = threading.Thread(
+                target=purge_worker,
+                args=(game,),
+                name=f"game-delete-{game['id']}",
+                daemon=True
+            )
+            try:
+                worker.start()
+            except Exception as exc:
+                ACTION_LOCK.release()
+                update_operation(
+                    running=False,
+                    message=f"无法创建后台操作：{exc}",
+                    finishedAt=now_iso(),
+                    error=str(exc)
+                )
+                raise
+            self.json_response(202, {"accepted": True, "operation": operation})
             return
         mod_match = re.fullmatch(r"/api/games/([a-z0-9_-]+)/mods/(.+)", path)
         if not mod_match:

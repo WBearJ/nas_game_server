@@ -9,6 +9,7 @@ const emptyLibrary = document.querySelector("#emptyLibrary");
 const libraryView = document.querySelector("#libraryView");
 const addGameView = document.querySelector("#addGameView");
 const catalogGrid = document.querySelector("#catalogGrid");
+const addGameSetup = document.querySelector("#addGameSetup");
 const openAddGameButton = document.querySelector("#openAddGameButton");
 const emptyAddGameButton = document.querySelector("#emptyAddGameButton");
 const backFromAddGameButton = document.querySelector("#backFromAddGameButton");
@@ -22,6 +23,16 @@ const logsButton = document.querySelector("#logsButton");
 const refreshButton = document.querySelector("#refreshButton");
 const logoutButton = document.querySelector("#logoutButton");
 const logDialog = document.querySelector("#logDialog");
+const uploadDialog = document.querySelector("#uploadDialog");
+const uploadTitle = document.querySelector("#uploadTitle");
+const uploadSummary = document.querySelector("#uploadSummary");
+const uploadList = document.querySelector("#uploadList");
+const closeUploadButton = document.querySelector("#closeUploadButton");
+const confirmDialog = document.querySelector("#confirmDialog");
+const confirmTitle = document.querySelector("#confirmTitle");
+const confirmMessage = document.querySelector("#confirmMessage");
+const confirmCancel = document.querySelector("#confirmCancel");
+const confirmAccept = document.querySelector("#confirmAccept");
 const logOperationStatus = document.querySelector("#logOperationStatus");
 const logOutput = document.querySelector("#logOutput");
 const logFilter = document.querySelector("#logFilter");
@@ -258,6 +269,20 @@ function setMetricValue(root, key, value) {
   if (node && node.textContent !== value) node.textContent = value;
 }
 
+function gameErrorText(game) {
+  if (activeOperation.running && activeOperation.gameId === game.id) return "";
+  return String(game.error || "").trim();
+}
+
+function syncGameError(card, game) {
+  const text = gameErrorText(game);
+  const node = card.querySelector(".game-error");
+  if (!node) return;
+  node.hidden = !text;
+  node.textContent = text ? tt(text) : "";
+  card.classList.toggle("has-error", Boolean(text));
+}
+
 function actionButton(label, action, game, secondary = false) {
   const button = createElement("button", `action-button${secondary ? " secondary" : ""}`, label);
   button.type = "button";
@@ -281,6 +306,11 @@ function renderGameActions(actions, game) {
   details.type = "button";
   details.addEventListener("click", () => openGameDetail(game.id));
   actions.append(details);
+  const remove = createElement("button", "action-button danger", "删除");
+  remove.type = "button";
+  remove.disabled = Boolean(activeOperation.running);
+  remove.addEventListener("click", () => deleteGame(game));
+  actions.append(remove);
 }
 
 function renderGame(game) {
@@ -356,8 +386,11 @@ function renderGame(game) {
   const actions = createElement("div", "game-actions");
   renderGameActions(actions, game);
   actions.dataset.signature = `${game.state}:${Boolean(activeOperation.running)}`;
-  content.append(head, metrics, actions);
+  const error = createElement("p", "game-error");
+  error.setAttribute("role", "alert");
+  content.append(head, metrics, actions, error);
   card.append(visual, content);
+  syncGameError(card, game);
   return card;
 }
 
@@ -382,6 +415,7 @@ function updateGameCard(card, game) {
     "pink"
   );
   setMetricValue(card, "disk", formatBytes(game.metrics?.diskBytes));
+  syncGameError(card, game);
   const actions = card.querySelector(".game-actions");
   const signature = `${game.state}:${Boolean(activeOperation.running)}`;
   if (actions?.dataset.signature !== signature) {
@@ -447,17 +481,20 @@ function renderCatalogGame(game) {
     imageShell.append(image);
   }
   const content = createElement("div", "catalog-content");
-  content.append(
-    createElement("h3", "", game.name),
-    createElement("p", "catalog-description", game.description)
-  );
-  const facts = createElement("dl", "catalog-facts");
-  facts.append(fact("版本", game.version), fact("加载器", game.loader), fact("连接端口", game.endpoint));
-  content.append(facts);
+  content.append(createElement("h3", "", game.name));
+  const pendingSetup = Boolean(game.setup && !game.added);
+  if (!pendingSetup && game.description) {
+    content.append(createElement("p", "catalog-description", game.description));
+  }
+  if (!pendingSetup) {
+    const facts = createElement("dl", "catalog-facts");
+    facts.append(fact("版本", game.version), fact("加载器", game.loader), fact("连接端口", game.endpoint));
+    content.append(facts);
+  }
   const button = createElement(
     "button",
     `action-button${game.added ? " secondary" : ""}`,
-    game.added ? "从首页移除" : "添加到首页"
+    game.added ? "从首页移除" : game.setup ? "开始配置" : "添加到首页"
   );
   button.type = "button";
   button.addEventListener("click", () => updateLibraryGame(game, button));
@@ -467,7 +504,12 @@ function renderCatalogGame(game) {
 }
 
 function renderCatalog(payload) {
-  catalogGrid.replaceChildren(...(payload.games || []).map(renderCatalogGame));
+  const games = (payload.games || []).filter((game) => !game.added);
+  if (!games.length) {
+    catalogGrid.replaceChildren(createElement("p", "empty-state catalog-empty", "所有可用游戏都已添加。"));
+    return;
+  }
+  catalogGrid.replaceChildren(...games.map(renderCatalogGame));
 }
 
 async function loadCatalog() {
@@ -490,6 +532,10 @@ async function loadCatalog() {
 }
 
 async function updateLibraryGame(game, button) {
+  if (!game.added && game.setup) {
+    await openGameSetup(game);
+    return;
+  }
   button.disabled = true;
   try {
     const payload = await api(`/api/game-library/${game.id}`, {
@@ -501,6 +547,360 @@ async function updateLibraryGame(game, button) {
     setMessage(error.message, true);
     button.disabled = false;
   }
+}
+
+function closeGameSetup() {
+  if (!addGameSetup) return;
+  addGameSetup.hidden = true;
+  addGameSetup.replaceChildren();
+  catalogGrid.hidden = false;
+}
+
+async function openGameSetup(game) {
+  catalogGrid.hidden = true;
+  addGameSetup.hidden = false;
+  addGameSetup.replaceChildren(createElement("p", "empty-state", "正在加载配置…"));
+  try {
+    const payload = await api(`/api/games/${game.id}/setup`);
+    renderGameSetup(game, payload);
+  } catch (error) {
+    addGameSetup.replaceChildren();
+    const back = createElement("button", "text-button", "返回游戏库");
+    back.type = "button";
+    back.addEventListener("click", closeGameSetup);
+    addGameSetup.append(createElement("p", "empty-state", `无法加载配置：${error.message}`), back);
+    setMessage(error.message, true);
+  }
+}
+
+function fillVersionSelect(select, versions, selected) {
+  const items = [...versions];
+  if (selected && !items.includes(selected)) items.unshift(selected);
+  select.replaceChildren();
+  for (const version of items) {
+    const option = document.createElement("option");
+    option.value = version;
+    option.textContent = version;
+    option.selected = version === selected;
+    select.append(option);
+  }
+}
+
+function bindMinecraftRuntimeFields(root, runtime) {
+  const loaderInput = root.querySelector('[name="loader"]');
+  const versionInput = root.querySelector('[name="mcVersion"]');
+  const modsPanel = root.querySelector("[data-setup-mods]");
+  if (!loaderInput || !versionInput || !runtime?.versions) return;
+  const sync = () => {
+    const loader = loaderInput.value;
+    const versions = runtime.versions[loader] || [];
+    fillVersionSelect(versionInput, versions, versionInput.value);
+    if (modsPanel) {
+      const info = (runtime.loaders || []).find((item) => item.id === loader);
+      modsPanel.hidden = info ? !info.mods : loader === "vanilla";
+    }
+  };
+  loaderInput.addEventListener("change", sync);
+  sync();
+}
+
+function collectSettingsFrom(root) {
+  const values = {};
+  for (const input of root.querySelectorAll("[data-setting-type]")) {
+    values[input.name] = input.dataset.settingType === "boolean" ? input.checked : input.value;
+  }
+  return values;
+}
+
+function collectJarFiles(fileList) {
+  const jars = [];
+  let rejected = false;
+  for (const file of fileList || []) {
+    if (file.name.toLowerCase().endsWith(".jar")) jars.push(file);
+    else rejected = true;
+  }
+  if (rejected) setMessage("只能添加 .jar 格式的 Mod 文件", true);
+  return jars;
+}
+
+function createModDropzone({ disabled = false, onFiles }) {
+  const zone = createElement("label", `mod-dropzone${disabled ? " is-disabled" : ""}`);
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".jar,application/java-archive";
+  input.multiple = true;
+  input.hidden = true;
+  input.disabled = disabled;
+  zone.append(
+    input,
+    createElement("strong", "", "拖拽 .jar 到此处，或点击选择"),
+    createElement("span", "", "支持同时选择多个 Mod 文件")
+  );
+  const take = (list) => {
+    if (disabled || input.disabled) return;
+    const jars = collectJarFiles(list);
+    if (jars.length) onFiles(jars);
+  };
+  zone.addEventListener("dragenter", (event) => {
+    event.preventDefault();
+    if (!input.disabled) zone.classList.add("is-dragover");
+  });
+  zone.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    if (!input.disabled) zone.classList.add("is-dragover");
+  });
+  zone.addEventListener("dragleave", (event) => {
+    if (!zone.contains(event.relatedTarget)) zone.classList.remove("is-dragover");
+  });
+  zone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    zone.classList.remove("is-dragover");
+    take(event.dataTransfer?.files);
+  });
+  input.addEventListener("change", () => {
+    take(input.files);
+    input.value = "";
+  });
+  return zone;
+}
+
+function formatUploadProgress(loaded, total) {
+  if (!total) return formatBytes(loaded);
+  return `${formatBytes(loaded)} / ${formatBytes(total)}`;
+}
+
+function setUploadRow(row, { status, percent, detail, error = false }) {
+  row.classList.toggle("is-error", error);
+  row.classList.toggle("is-done", status === "完成");
+  row.classList.toggle("is-active", status === "上传中");
+  row.querySelector(".upload-row-status").textContent = tt(status);
+  row.querySelector(".upload-row-detail").textContent = detail || "";
+  row.querySelector(".upload-row-bar span").style.width = `${Math.max(0, Math.min(100, percent || 0))}%`;
+}
+
+function openUploadDialog(title, files) {
+  uploadTitle.textContent = tt(title);
+  uploadSummary.textContent = tt("准备上传");
+  closeUploadButton.disabled = true;
+  closeUploadButton.textContent = tt("关闭");
+  uploadList.replaceChildren();
+  const rows = files.map((file) => {
+    const row = createElement("article", "upload-row");
+    const identity = createElement("div", "upload-row-identity");
+    identity.append(
+      createElement("strong", "", file.name),
+      createElement("span", "upload-row-detail", formatBytes(file.size))
+    );
+    const meta = createElement("div", "upload-row-meta");
+    meta.append(createElement("span", "upload-row-status", "等待中"));
+    const bar = createElement("div", "upload-row-bar");
+    bar.append(document.createElement("span"));
+    row.append(identity, meta, bar);
+    uploadList.append(row);
+    return row;
+  });
+  if (!uploadDialog.open) uploadDialog.showModal();
+  return rows;
+}
+
+function closeUploadDialog() {
+  if (uploadDialog.open) uploadDialog.close();
+}
+
+function uploadModFile(gameId, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/games/${gameId}/mods/upload`);
+    xhr.setRequestHeader("X-Control-Session", sessionToken);
+    xhr.setRequestHeader("X-Control-Language", i18n.locale);
+    xhr.setRequestHeader("Content-Type", "application/java-archive");
+    xhr.setRequestHeader("X-Mod-Filename", encodeURIComponent(file.name));
+    xhr.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) onProgress(event.loaded, event.total);
+    });
+    xhr.addEventListener("load", () => {
+      let payload = {};
+      try {
+        payload = JSON.parse(xhr.responseText || "{}");
+      } catch {
+        payload = { error: t("总控返回了无法识别的响应") };
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress(file.size, file.size);
+        resolve(payload);
+        return;
+      }
+      reject(new Error(tt(payload.error || `请求失败：${xhr.status}`)));
+    });
+    xhr.addEventListener("error", () => reject(new Error(t("Mod 添加失败"))));
+    xhr.addEventListener("abort", () => reject(new Error(t("Mod 添加失败"))));
+    xhr.send(file);
+  });
+}
+
+async function startModUploads(gameId, files, rows) {
+  let uploaded = 0;
+  try {
+    for (const [index, file] of files.entries()) {
+      uploadSummary.textContent = tt(`正在上传 ${index + 1}/${files.length}：${file.name}`);
+      setUploadRow(rows[index], {
+        status: "上传中",
+        percent: 0,
+        detail: `${formatBytes(0)} / ${formatBytes(file.size)}`
+      });
+      await uploadModFile(gameId, file, (loaded, total) => {
+        const percent = total ? Math.round((loaded / total) * 100) : 0;
+        setUploadRow(rows[index], {
+          status: "上传中",
+          percent,
+          detail: `${formatUploadProgress(loaded, total)} · ${percent}%`
+        });
+      });
+      setUploadRow(rows[index], {
+        status: "完成",
+        percent: 100,
+        detail: `${formatBytes(file.size)} · 100%`
+      });
+      uploaded += 1;
+    }
+    uploadSummary.textContent = tt(`已添加 ${uploaded} 个 Mod，重启服务器后生效`);
+    return { uploaded };
+  } catch (error) {
+    const failed = rows[uploaded];
+    if (failed) {
+      setUploadRow(failed, {
+        status: "失败",
+        percent: 0,
+        detail: error.message,
+        error: true
+      });
+    }
+    uploadSummary.textContent = uploaded
+      ? tt(`已添加 ${uploaded} 个 Mod，后续上传失败：${error.message}`)
+      : tt(`Mod 添加失败：${error.message}`);
+    throw error;
+  } finally {
+    closeUploadButton.disabled = false;
+  }
+}
+
+async function uploadModFiles(gameId, files, title = "正在上传 Mod") {
+  if (!files?.length) return { uploaded: 0 };
+  return startModUploads(gameId, files, openUploadDialog(title, files));
+}
+
+function renderGameSetup(game, payload) {
+  const isMinecraft = game.id === "minecraft";
+  const form = createElement("form", "setup-form glass-panel");
+  const heading = createElement("div", "setup-heading");
+  heading.append(
+    createElement("p", "eyebrow", "初始化"),
+    createElement("h2", "", `配置 ${game.name}`),
+    createElement(
+      "p",
+      "section-description",
+      isMinecraft
+        ? "先选择加载器和游戏版本，并可同时设置常用配置、上传 Mod。"
+        : "首次启动前完成常用配置；添加后仍可在详情页调整可修改项。"
+    )
+  );
+  const fields = createElement("div", "settings-grid");
+  for (const setting of payload.settings || []) fields.append(renderSettingField(setting));
+  const mods = createElement("div", "setup-mods");
+  mods.dataset.setupMods = "true";
+  const pending = [];
+  const list = createElement("div", "mod-list");
+  const renderPending = () => {
+    list.replaceChildren();
+    if (!pending.length) {
+      list.append(createElement("p", "empty-state", "还没有选择 Mod 文件。"));
+      return;
+    }
+    for (const [index, file] of pending.entries()) {
+      const row = createElement("article", "mod-row");
+      const identity = createElement("div", "mod-identity");
+      identity.append(createElement("strong", "", file.name), createElement("span", "", formatBytes(file.size)));
+      const remove = createElement("button", "player-action secondary", "删除");
+      remove.type = "button";
+      remove.addEventListener("click", () => {
+        pending.splice(index, 1);
+        renderPending();
+      });
+      row.append(identity, remove);
+      list.append(row);
+    }
+  };
+  const addPending = (files) => {
+    for (const file of files) {
+      if (!pending.some((item) => item.name === file.name && item.size === file.size)) pending.push(file);
+    }
+    renderPending();
+  };
+  const dropzone = createModDropzone({ onFiles: addPending });
+  const modsHeading = createElement("div", "panel-heading");
+  const modsTitle = document.createElement("div");
+  modsTitle.append(createElement("p", "eyebrow", "Mod"), createElement("h2", "", "初始化 Mod"));
+  modsHeading.append(modsTitle);
+  mods.append(
+    modsHeading,
+    createElement("p", "mod-note", "可选。原版不显示此项；模组服可在创建时上传 .jar，启动后生效。"),
+    dropzone,
+    list
+  );
+  renderPending();
+  const actions = createElement("div", "setup-actions");
+  const cancel = createElement("button", "action-button secondary", "返回游戏库");
+  cancel.type = "button";
+  cancel.addEventListener("click", closeGameSetup);
+  const submit = createElement("button", "primary-button", "添加到首页");
+  submit.type = "submit";
+  actions.append(cancel, submit);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    submit.disabled = true;
+    cancel.disabled = true;
+    try {
+      const settings = collectSettingsFrom(form);
+      let rows = [];
+      if (pending.length) {
+        rows = openUploadDialog("正在添加游戏", pending);
+        uploadSummary.textContent = tt("正在保存游戏配置");
+      }
+      const payloadResult = await api(`/api/game-library/${game.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings })
+      });
+      let uploaded = 0;
+      const loader = settings.loader || "neoforge";
+      const allowMods = Boolean(payload.supportsMods)
+        && payload.runtime?.loaders?.find((item) => item.id === loader)?.mods !== false
+        && loader !== "vanilla";
+      if (allowMods && pending.length) {
+        uploadTitle.textContent = tt("正在上传 Mod");
+        uploaded = (await startModUploads(game.id, pending, rows)).uploaded;
+      } else if (uploadDialog.open) {
+        uploadSummary.textContent = tt(payloadResult.message);
+        closeUploadButton.disabled = false;
+      }
+      setMessage(uploaded ? `${payloadResult.message}，并已上传 ${uploaded} 个 Mod` : payloadResult.message);
+      closeGameSetup();
+      await Promise.all([loadCatalog(), loadGames({ quiet: true })]);
+    } catch (error) {
+      setMessage(error.message, true);
+      submit.disabled = false;
+      cancel.disabled = false;
+      if (uploadDialog.open) {
+        uploadSummary.textContent = error.message;
+        closeUploadButton.disabled = false;
+      }
+    }
+  });
+  form.append(heading, fields);
+  if (payload.supportsMods) form.append(mods);
+  form.append(actions);
+  addGameSetup.replaceChildren(form);
+  bindMinecraftRuntimeFields(form, payload.runtime);
 }
 
 function openAddGame() {
@@ -516,6 +916,7 @@ function openAddGame() {
 
 function closeAddGame() {
   const wasOpen = !addGameView.hidden;
+  closeGameSetup();
   addGameView.hidden = true;
   detailView.hidden = true;
   libraryView.hidden = false;
@@ -544,6 +945,8 @@ function getDetailSignature(game) {
     serverInfo: game.serverInfo,
     configuration: game.configuration,
     settings: game.settings,
+    runtimeLocked: game.runtimeLocked,
+    accessLists: game.accessLists,
     features: game.features,
     managementAvailable: game.managementAvailable,
     managementError: game.managementError,
@@ -607,8 +1010,8 @@ function detailAction(label, game, action, secondary = false) {
   return button;
 }
 
-function playerActionButton(label, gameId, player, action, secondary = true) {
-  const button = createElement("button", `player-action${secondary ? " secondary" : ""}`, label);
+function playerActionButton(label, gameId, player, action, secondary = true, danger = false) {
+  const button = createElement("button", `player-action${secondary ? " secondary" : ""}${danger ? " danger" : ""}`, label);
   button.type = "button";
   button.addEventListener("click", () => runPlayerAction(gameId, player, action));
   return button;
@@ -697,8 +1100,88 @@ function renderPlayer(game, player) {
       player.isWhitelisted ? "whitelist-remove" : "whitelist-add"
     )
   );
+  actions.append(playerActionButton("加入黑名单", game.id, player.name, "ban", true, true));
   row.append(identity, actions);
   return row;
+}
+
+function renderAccessEntry(game, entry, removeAction) {
+  const row = createElement("article", "access-row");
+  const identity = createElement("div", "access-identity");
+  identity.append(createElement("strong", "", entry.name));
+  if (entry.reason) identity.append(createElement("span", "", `原因：${entry.reason}`));
+  else if (entry.uuid) identity.append(createElement("span", "", `UUID：${entry.uuid}`));
+  const remove = createElement("button", "player-action secondary danger", "移除");
+  remove.type = "button";
+  remove.disabled = game.state !== "running" || Boolean(activeOperation.running);
+  remove.addEventListener("click", () => runPlayerAction(game.id, entry.name, removeAction));
+  row.append(identity, remove);
+  return row;
+}
+
+function renderAccessGroup(game, label, entries, removeAction) {
+  const group = createElement("section", "access-group");
+  const heading = createElement("div", "access-group-heading");
+  heading.append(createElement("strong", "", label), createElement("span", "", String(entries.length)));
+  const list = createElement("div", "access-list");
+  if (!entries.length) list.append(createElement("p", "empty-state compact", "当前名单为空。"));
+  else list.append(...entries.map((entry) => renderAccessEntry(game, entry, removeAction)));
+  group.append(heading, list);
+  return group;
+}
+
+function renderAccessPanel(game) {
+  const lists = game.accessLists || { operators: [], whitelist: [], bannedPlayers: [] };
+  const panel = createElement("section", "detail-panel access-panel glass-panel");
+  const heading = createElement("div", "panel-heading");
+  const title = document.createElement("div");
+  const total = lists.operators.length + lists.whitelist.length + lists.bannedPlayers.length;
+  title.append(createElement("p", "eyebrow", "访问控制"), createElement("h2", "", "名单管理"));
+  heading.append(title, createElement("strong", "panel-count", String(total)));
+
+  const addForm = createElement("form", "access-add-form");
+  const nameInput = document.createElement("input");
+  nameInput.type = "text";
+  nameInput.maxLength = 16;
+  nameInput.pattern = "[A-Za-z0-9_]{1,16}";
+  nameInput.placeholder = t("输入 Minecraft 玩家名");
+  const typeSelect = document.createElement("select");
+  for (const [value, label] of [["op", "管理员"], ["whitelist-add", "白名单"], ["ban", "黑名单"]]) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = tt(label);
+    typeSelect.append(option);
+  }
+  const add = createElement("button", "player-action", "加入名单");
+  add.type = "submit";
+  const disabled = game.state !== "running" || Boolean(activeOperation.running);
+  nameInput.disabled = disabled;
+  typeSelect.disabled = disabled;
+  add.disabled = disabled;
+  addForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const name = nameInput.value.trim();
+    if (!name || !nameInput.checkValidity()) {
+      nameInput.reportValidity();
+      return;
+    }
+    const completed = await runPlayerAction(game.id, name, typeSelect.value);
+    if (completed) nameInput.value = "";
+  });
+  addForm.append(nameInput, typeSelect, add);
+
+  const groups = createElement("div", "access-groups");
+  groups.append(
+    renderAccessGroup(game, "管理员", lists.operators, "deop"),
+    renderAccessGroup(game, "白名单", lists.whitelist, "whitelist-remove"),
+    renderAccessGroup(game, "黑名单", lists.bannedPlayers, "pardon")
+  );
+  const note = createElement("p", "settings-note", disabled
+    ? "启动服务器后可以添加或移除名单成员。"
+    : "名单修改会立即写入 Minecraft 服务器。"
+  );
+  panel.append(heading, addForm, groups, note);
+  return panel;
 }
 
 function renderMod(gameId, mod) {
@@ -718,8 +1201,16 @@ function renderMod(gameId, mod) {
 }
 
 function renderSettingField(setting) {
-  const field = createElement("label", `setting-field${setting.type === "boolean" ? " is-toggle" : ""}`);
+  const field = createElement("label", `setting-field${setting.type === "boolean" ? " is-toggle" : ""}${setting.locked ? " is-locked" : ""}`);
   const heading = createElement("span", "setting-label", setting.label);
+  if (setting.locked) {
+    field.append(
+      heading,
+      createElement("span", "setting-locked-value", setting.value ?? "—"),
+      createElement("small", "setting-hint", setting.hint || "服务器初始化后不可修改")
+    );
+    return field;
+  }
   let input;
   if (setting.type === "select") {
     input = document.createElement("select");
@@ -796,46 +1287,24 @@ function renderSettingsPanel(game) {
   });
   form.append(heading, fields, note);
   panel.append(form);
+  bindMinecraftRuntimeFields(form, game.runtime);
   return panel;
 }
 
-function chooseMod(gameId) {
-  if (modBusy) return;
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = ".jar,application/java-archive";
-  input.hidden = true;
-  document.body.append(input);
-  const cleanup = () => input.remove();
-  input.addEventListener("cancel", cleanup, { once: true });
-  input.addEventListener("change", async () => {
-    const file = input.files?.[0];
-    cleanup();
-    if (!file) return;
-    if (!file.name.toLowerCase().endsWith(".jar")) {
-      setMessage("只能添加 .jar 格式的 Mod 文件", true);
-      return;
-    }
-    modBusy = true;
-    setMessage(`正在上传 ${file.name}`);
-    try {
-      const payload = await api(`/api/games/${gameId}/mods/upload`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/java-archive",
-          "X-Mod-Filename": encodeURIComponent(file.name)
-        },
-        body: file
-      });
-      setMessage(payload.message);
-    } catch (error) {
-      setMessage(`Mod 添加失败：${error.message}`, true);
-    } finally {
-      modBusy = false;
-      if (activeGameId === gameId) await loadGameDetail({ quiet: true });
-    }
-  }, { once: true });
-  input.click();
+async function uploadMods(gameId, files) {
+  if (modBusy || !files?.length) return;
+  modBusy = true;
+  try {
+    const result = await uploadModFiles(gameId, files);
+    setMessage(result.uploaded > 1
+      ? `已添加 ${result.uploaded} 个 Mod，重启服务器后生效`
+      : `已添加 ${files[0].name}，重启服务器后生效`);
+  } catch (error) {
+    setMessage(error.message, true);
+  } finally {
+    modBusy = false;
+    if (activeGameId === gameId) await loadGameDetail({ quiet: true });
+  }
 }
 
 async function deleteMod(gameId, filename) {
@@ -937,14 +1406,9 @@ function renderDetail(game) {
   const modsPanel = createElement("section", "detail-panel mods-panel glass-panel");
   const modsHeading = createElement("div", "panel-heading");
   const modsTitle = document.createElement("div");
-  modsTitle.append(createElement("p", "eyebrow", "NeoForge"), createElement("h2", "", "Mod 管理"));
+  modsTitle.append(createElement("p", "eyebrow", game.loader || "Mod"), createElement("h2", "", "Mod 管理"));
   const modsActions = createElement("div", "mods-heading-actions");
   modsActions.append(createElement("strong", "panel-count", String(game.mods?.length || 0)));
-  const addMod = createElement("button", "player-action", "添加 Mod");
-  addMod.type = "button";
-  addMod.disabled = modBusy;
-  addMod.addEventListener("click", () => chooseMod(game.id));
-  modsActions.append(addMod);
   modsHeading.append(modsTitle, modsActions);
   const modList = createElement("div", "mod-list");
   if (!game.mods?.length) {
@@ -955,6 +1419,7 @@ function renderDetail(game) {
   modsPanel.append(
     modsHeading,
     createElement("p", "mod-note", "添加或删除后需要重启 Minecraft 服务器才能生效。"),
+    createModDropzone({ disabled: modBusy, onFiles: (files) => uploadMods(game.id, files) }),
     modList
   );
 
@@ -1068,9 +1533,10 @@ function renderDetail(game) {
 
   const lowerGrid = createElement("div", "detail-grid");
   lowerGrid.append(playersPanel, worldPanel);
+  if (game.detailType === "minecraft") lowerGrid.append(renderAccessPanel(game));
   lowerGrid.append(configurationPanel);
   if (["palworld", "terraria", "zomboid"].includes(game.detailType)) lowerGrid.append(announcePanel);
-  if (game.detailType === "minecraft") lowerGrid.append(modsPanel);
+  if (game.detailType === "minecraft" && game.supportsMods !== false) lowerGrid.append(modsPanel);
   lowerGrid.append(backupPanel, containerPanel);
   detailContent.replaceChildren(hero, metrics, lowerGrid);
   detailRenderSignature = getDetailSignature(game);
@@ -1137,6 +1603,7 @@ function closeGameDetail() {
 }
 
 async function runPlayerAction(gameId, playerName, action) {
+  if (action === "ban" && !window.confirm(t("确定将该玩家加入黑名单吗？"))) return false;
   try {
     const payload = await api(
       `/api/games/${gameId}/players/${encodeURIComponent(playerName)}/${action}`,
@@ -1145,8 +1612,10 @@ async function runPlayerAction(gameId, playerName, action) {
     setMessage(payload.message);
     await delay(700);
     await loadGameDetail({ quiet: true });
+    return true;
   } catch (error) {
     setMessage(error.message, true);
+    return false;
   }
 }
 
@@ -1260,6 +1729,55 @@ async function loadGames({ quiet = false } = {}) {
   }
 }
 
+async function confirmDanger({ title, message, confirmLabel = "确认删除" }) {
+  return new Promise((resolve) => {
+    let settled = false;
+    confirmTitle.textContent = tt(title);
+    confirmMessage.textContent = tt(message);
+    confirmAccept.textContent = tt(confirmLabel);
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      confirmDialog.removeEventListener("close", onClose);
+      if (confirmDialog.open) confirmDialog.close();
+      resolve(value);
+    };
+    const onClose = () => finish(false);
+    confirmAccept.onclick = () => finish(true);
+    confirmCancel.onclick = () => finish(false);
+    confirmDialog.addEventListener("close", onClose);
+    confirmDialog.showModal();
+  });
+}
+
+async function deleteGame(game) {
+  const confirmed = await confirmDanger({
+    title: `删除 ${game.name}？`,
+    message: "将停止服务器，并永久删除世界、模组、备份和容器。此操作无法恢复。"
+  });
+  if (!confirmed) return;
+  if (activeOperation.running) {
+    setMessage(`正在执行：${activeOperation.message}`, true);
+    openLogs(game.id);
+    return;
+  }
+  busyGame = game.id;
+  setMessage(`正在删除 ${game.name}`);
+  try {
+    const payload = await api(`/api/games/${game.id}`, { method: "DELETE" });
+    activeOperation = payload.operation;
+    setMessage(`${payload.operation.message}。日志窗口会持续显示进度。`);
+    openLogs(game.id);
+    await monitorAction(game.id, "删除");
+    if (activeGameId === game.id) closeGameDetail();
+  } catch (error) {
+    setMessage(error.message, true);
+    if (error.status === 409) openLogs(game.id);
+    busyGame = null;
+    await loadGames({ quiet: true });
+  }
+}
+
 async function runAction(gameId, action, label) {
   if (activeOperation.running) {
     setMessage(`正在执行：${activeOperation.message}`, true);
@@ -1300,6 +1818,7 @@ async function monitorAction(gameId, label) {
     } else {
       setMessage(operation.message || `${label}操作已完成`);
     }
+    if (label === "删除" && activeGameId === gameId) closeGameDetail();
     if (logDialog.open) await loadLogs();
     if (activeGameId === gameId) await loadGameDetail({ quiet: true });
     return;
@@ -1490,6 +2009,10 @@ logDialog.addEventListener("close", () => {
     window.clearInterval(logPollTimer);
     logPollTimer = null;
   }
+});
+closeUploadButton.addEventListener("click", closeUploadDialog);
+uploadDialog.addEventListener("cancel", (event) => {
+  if (closeUploadButton.disabled) event.preventDefault();
 });
 logoutButton.addEventListener("click", () => logout("", true));
 

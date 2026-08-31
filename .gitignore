@@ -3,6 +3,7 @@
 config/game-settings.json
 *.tar.gz
 data/
+minecraft/installer/
 mods/*.jar
 backups/
 .DS_Store

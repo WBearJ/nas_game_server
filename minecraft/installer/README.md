@@ -1,9 +1,9 @@
 # NeoForge 本地安装器
 
-本目录应包含：
+把下载好的安装器放到本目录，文件名必须是：
 
-`neoforge-26.2.0.62-installer.jar`
+`neoforge-<版本>-installer.jar`
 
-配置会将本目录只读挂载为容器内的 `/installer`，避免容器启动时先从 NeoForge Maven 查询并下载安装器。
+例如：`neoforge-26.2.0.62-installer.jar`
 
-安装器本身仍可能下载 Minecraft 和 NeoForge 的其他运行库；如这些下载也被网络重置，需要使用 HTTP 代理或在网络正常的电脑上完成完整服务端预安装。
+大陆网络下如何下载、拷贝，以及如何让已创建的容器重新读取该文件，见仓库根目录 [README.md](../../README.md#neoforge-offline)。

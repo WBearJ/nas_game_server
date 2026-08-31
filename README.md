@@ -26,6 +26,7 @@ nas_game_server
 │   ├── <a href="terraria/">terraria/</a> · <a href="terraria/README.md">说明</a>
 │   └── <a href="zomboid/">zomboid/</a> · <a href="zomboid/README.md">说明</a>
 ├── <a href="#deploy">部署说明</a>
+├── <a href="#neoforge-offline">大陆网络手动安装 NeoForge</a>
 ├── <a href="#accounts">管理账号</a>
 ├── <a href="#runtime">运行逻辑</a>
 ├── <a href="#details">网页详情与玩家管理</a>
@@ -101,6 +102,8 @@ nas_game_server
 
 总控会在首次启动 Minecraft 前自动创建 `minecraft/data`、`mods`、`installer` 和 `backups` 目录。为此，总控容器会把 `.env` 中的 `HOST_PROJECT_PATH` 挂载到内部的 `/host-project`；修改 NAS 项目路径后必须重新创建总控容器，不能只重启旧容器。
 
+大陆网络下首次启动 Minecraft 常会在安装 NeoForge 时失败（日志出现 `Connection reset by peer` 或 `Failed to install NeoForge`）。官方 Maven 没有国内镜像，请按下面「大陆网络手动安装 NeoForge」把安装器放到 `minecraft/installer/`。
+
 总控代码目录也会从 `${HOST_PROJECT_PATH}/controller` 直接只读挂载到容器的 `/app`。第一次升级到这个版本时，需要重新创建一次总控容器以加载新增挂载；以后替换 `controller` 中的文件后不必重新构建镜像，只需重启 `nas-game-controller`。如果使用 SSH，可执行：
 
 ```bash
@@ -109,6 +112,78 @@ docker compose up -d --force-recreate controller
 ```
 
 以后更新 `server.py`、`games.json` 或网页文件时执行 `docker restart nas-game-controller` 即可。网页文件更新后再对浏览器执行一次强制刷新，避免浏览器继续显示旧缓存。
+
+<a id="neoforge-offline"></a>
+## 大陆网络手动安装 NeoForge
+
+NeoForge 官方 Maven（`maven.neoforged.net`）**没有官方国内镜像**。社区源（如 BMCLAPI）可以用来下载安装器文件，但不能替换 itzg 镜像访问的 Maven 仓库。容器在 `NEOFORGE_VERSION=latest` 时仍会去官方站查询元数据，大陆网络上经常被重置。
+
+做法：在能打开下载页的电脑上下载安装器，再拷到 NAS 的指定目录。总控发现匹配的 jar 后会使用本地安装器，跳过官方元数据查询。
+
+### 1. 确认要下载的版本
+
+打开网页总控，在 Minecraft 详情里看当前「游戏版本」。安装器版本号的前两段必须对应这个游戏版本，例如：
+
+| 网页游戏版本 | 安装器文件名示例 |
+| --- | --- |
+| `26.2` | `neoforge-26.2.0.62-installer.jar` |
+| `1.21.1` | `neoforge-21.1.213-installer.jar` |
+| `1.20.1` | `neoforge-47.1.106-installer.jar` |
+
+数字部分以下载页当时的最新稳定版为准，文件名必须保持 `neoforge-<版本>-installer.jar`。
+
+### 2. 下载安装器
+
+任选一种能打开的来源：
+
+1. [NeoForge 官方下载](https://neoforged.net/) 或 [文件列表](https://projects.neoforged.net/neoforged/neoforge)，下载对应版本的 *Installer*。
+2. 官方 Maven 直链（把版本号换成上一步的）：
+
+```text
+https://maven.neoforged.net/releases/net/neoforged/neoforge/26.2.0.62/neoforge-26.2.0.62-installer.jar
+```
+
+3. 官方打不开时，可用 BMCLAPI 直链（同样替换版本号）：
+
+```text
+https://bmclapi2.bangbang93.com/maven/net/neoforged/neoforge/26.2.0.62/neoforge-26.2.0.62-installer.jar
+```
+
+电脑浏览器能打开上述地址即可。不要在 NAS 的 Docker 容器里下，那一步正是会失败的地方。
+
+### 3. 放到指定文件夹
+
+用群晖 **File Station** 或局域网拷贝，把 jar 放到：
+
+```text
+<项目目录>/minecraft/installer/neoforge-26.2.0.62-installer.jar
+```
+
+默认项目路径是 `/volume1/docker/nas_game_server`，完整路径即为：
+
+```text
+/volume1/docker/nas_game_server/minecraft/installer/neoforge-26.2.0.62-installer.jar
+```
+
+目录不存在时先建 `minecraft/installer`。只放安装器 jar，不要改后缀，也不要放进 `mods/` 或 `data/`。
+
+### 4. 重启总控并启动
+
+把安装器放到目录后：
+
+1. 确认 NAS 上的 `controller/server.py` 已更新，然后重启总控：`docker restart nas-game-controller`
+2. 在网页直接点「启动」。若已有失败的 `minecraft-neoforge` 容器，总控会自动重建它（保留 `minecraft/data`），不必再手动删除。
+
+总控日志应出现 `使用本地 NeoForge 安装器 /installer/neoforge-...-installer.jar`。游戏容器日志不应再出现 `fetching metadata for net.neoforged:neoforge`。
+
+如果日志写的是「未找到可用的 neoforge-*-installer.jar」，检查文件名是否为 `neoforge-<版本>-installer.jar`，以及是否放在 `minecraft/installer/` 而不是 `mods/`。
+
+### 5. 若安装器运行后仍报网络错误
+
+本地安装器只跳过「查询最新版本」。安装过程还可能下载 Minecraft 服务端和部分运行库。若日志仍是 `Connection reset by peer`：
+
+- 在根目录 `.env` 填写 NAS 能访问的 HTTP 代理，格式 `PROXY=主机:端口`，然后执行 `docker compose up -d --force-recreate controller`，再按上一步重建游戏容器。
+- 代理跑在 NAS 本机时可用 `127.0.0.1:端口`；跑在路由器或其他电脑时填局域网 IP，并允许局域网连接。
 
 <a id="accounts"></a>
 ## 管理账号
