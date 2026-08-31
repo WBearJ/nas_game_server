@@ -4,6 +4,41 @@
 
 本專案採用「總控常駐、遊戲按需啟動」的方式運行。NAS 或專案首次啟動時只有 `nas-game-controller` 自動啟動；Minecraft 和其他已註冊的遊戲服務不會自動啟動。遊戲容器統一使用 `restart: no`，因此 NAS 重新啟動後仍會保持停止，直到你再次於網頁啟動。自動備份由總控內部排程負責，不需要額外的備份容器。
 
+**文件目錄**
+
+<pre>
+nas_game_server
+├── <a href="#guide">使用教學</a>
+├── <a href="#layout">目錄結構</a>
+│   ├── <a href="compose.yaml">compose.yaml</a>
+│   ├── <a href=".env.example">.env.example</a>
+│   ├── <a href="controller/">controller/</a>
+│   │   ├── <a href="controller/Dockerfile">Dockerfile</a>
+│   │   ├── <a href="controller/server.py">server.py</a>
+│   │   ├── <a href="controller/games.json">games.json</a>
+│   │   └── <a href="controller/static/">static/</a>
+│   ├── <a href="minecraft/">minecraft/</a> · <a href="minecraft/README.md">說明</a>
+│   ├── <a href="palworld/">palworld/</a> · <a href="palworld/README.md">說明</a>
+│   ├── <a href="terraria/">terraria/</a> · <a href="terraria/README.md">說明</a>
+│   └── <a href="zomboid/">zomboid/</a> · <a href="zomboid/README.md">說明</a>
+├── <a href="#deploy">部署說明</a>
+├── <a href="#accounts">管理帳號</a>
+├── <a href="#runtime">運行邏輯</a>
+├── <a href="#details">詳情與玩家管理</a>
+├── <a href="#register">註冊其他遊戲</a>
+└── <a href="#security">安全說明</a>
+</pre>
+
+<a id="guide"></a>
+## 使用教學
+
+1. 把整個專案複製到 NAS 的一個資料夾，例如 `/volume1/docker/nas_game_server`。
+2. 確認該目錄裡有 `.env`。沒有的話，把 [`.env.example`](.env.example) 複製一份改名為 `.env`。路徑如果不是 `/volume1/docker/nas_game_server`，把其中的 `HOST_PROJECT_PATH` 改成實際路徑。
+3. 開啟 Synology **Container Manager → 專案**，點 **新增**，路徑選剛複製的專案資料夾，再點 **加入**。建置並啟動後，只會運行總控 `nas-game-controller`。
+4. 瀏覽器開啟 `http://NAS的區域網路IP:8088` 進入管理頁。預設帳號 `admin`，預設密碼 `admin123`。
+5. 在管理頁點選某個遊戲的「啟動」。第一次會建立對應容器，之後可隨時停止或再啟動。
+
+<a id="layout"></a>
 ## 目錄結構
 
 點選檔名即可開啟對應內容。`data/`、`backups/` 等執行時目錄會在首次啟動遊戲時自動建立，倉庫預設不包含。
@@ -32,14 +67,7 @@
   - `server-files/` — Build 42 伺服器檔案
   - `backups/` — Project Zomboid 最新備份
 
-## 使用教學
-
-1. 把整個專案複製到 NAS 的一個資料夾，例如 `/volume1/docker/nas_game_server`。
-2. 確認該目錄裡有 `.env`。沒有的話，把 [`.env.example`](.env.example) 複製一份改名為 `.env`。路徑如果不是 `/volume1/docker/nas_game_server`，把其中的 `HOST_PROJECT_PATH` 改成實際路徑。
-3. 開啟 Synology **Container Manager → 專案**，點 **新增**，路徑選剛複製的專案資料夾，再點 **加入**。建置並啟動後，只會運行總控 `nas-game-controller`。
-4. 瀏覽器開啟 `http://NAS的區域網路IP:8088` 進入管理頁。預設帳號 `admin`，預設密碼 `admin123`。
-5. 在管理頁點選某個遊戲的「啟動」。第一次會建立對應容器，之後可隨時停止或再啟動。
-
+<a id="deploy"></a>
 ## 部署說明
 
 若舊的 `minecraft-neoforge` 專案仍在運行，先備份並確認世界位於 `minecraft/data`，再停止並刪除舊容器。舊版 `minecraft-backup` 容器也可刪除。只刪除容器，不要刪除資料或 `minecraft/data`、`mods`、`installer`、`backups` 目錄。
@@ -59,6 +87,7 @@ docker restart nas-game-controller
 
 網頁檔案更新後請強制重新整理瀏覽器，避免使用舊快取。
 
+<a id="accounts"></a>
 ## 管理帳號
 
 在根目錄 `.env` 中設定：
@@ -78,6 +107,7 @@ CONTROL_ACCOUNTS_JSON={"admin":"改成高強度密碼","family":"另一個密碼
 
 頁面顯示「需遷移」代表仍有同名舊容器。保留資料並刪除舊容器後重新整理即可。若網頁連接埠衝突，修改 `CONTROL_PORT` 並重新建立總控。不要再將 `minecraft/compose.yaml` 部署為常駐專案，它僅供舊版參考。
 
+<a id="runtime"></a>
 ## 運行邏輯
 
 - 總控透過 `/var/run/docker.sock` 存取 Docker Engine，只能操作 `controller/games.json` 中註冊的固定容器名稱。
@@ -86,6 +116,7 @@ CONTROL_ACCOUNTS_JSON={"admin":"改成高強度密碼","family":"另一個密碼
 - 每次啟動或停止都會將容器重新啟動策略設為 `no`。
 - 所有遊戲每 72 小時自動備份，也可手動備份。備份前會要求伺服器儲存世界，每個遊戲只保留最新一份；Project Zomboid 使用 `zomboid/backups/zomboid-latest.tar.gz`。
 
+<a id="details"></a>
 ## 詳情與玩家管理
 
 - 遊戲卡片顯示即時 CPU、記憶體和遊戲目錄總大小。
@@ -101,6 +132,7 @@ CONTROL_ACCOUNTS_JSON={"admin":"改成高強度密碼","family":"另一個密碼
 - Project Zomboid 使用 Build 42 與 RCON。網際網路連線需放行 UDP `16261`–`16263`；RCON TCP `27016` 只綁定 NAS 本機。
 - Palworld 與 Project Zomboid 需要較多記憶體。20 GB NAS 建議按需單獨運行大型伺服器，避免同時啟動 Minecraft、Palworld 和 Project Zomboid。
 
+<a id="register"></a>
 ## 註冊其他遊戲
 
 在 `controller/games.json` 的 `games` 陣列加入遊戲物件。每個遊戲可包含主服務和多個附屬服務，`startOrder` 控制啟動順序，停止時自動反向處理。
@@ -119,6 +151,7 @@ CONTROL_ACCOUNTS_JSON={"admin":"改成高強度密碼","family":"另一個密碼
 
 註冊表支援 `${ENV_NAME:-default}` 範本。新增變數時也要透過根目錄 `compose.yaml` 傳入。修改後重新啟動 `nas-game-controller`；註冊遊戲不會自動啟動。圖示可用 `"icon": "/assets/檔名"` 指向 `controller/static/assets/` 中的本機檔案。
 
+<a id="security"></a>
 ## 安全說明
 
 Docker Socket 等同較高的 NAS 容器管理權限。總控雖不接受任意容器名稱、映像或命令，仍應只在可信任區域網路或 VPN 中使用。登入後簽發 12 小時暫時工作階段；HTTP 不會加密密碼和工作階段，請勿直接將 `8088` 暴露到網際網路。遠端管理應使用 Tailscale 或可信任的 HTTPS 反向代理。

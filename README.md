@@ -4,6 +4,41 @@
 
 该项目采用“总控常驻、游戏按需启动”的方式运行。NAS 或项目首次启动时只有 `nas-game-controller` 自动启动；Minecraft 和以后注册的其他游戏服务都不会自动启动。游戏容器由网页端创建和控制，并统一使用 `restart: no`，因此 NAS 重启后仍保持停止，直到你再次点击启动。自动备份由总控内部定时器负责，不需要额外的备份容器。
 
+**文档目录**
+
+<pre>
+nas_game_server
+├── <a href="#guide">使用教程</a>
+├── <a href="#layout">目录结构</a>
+│   ├── <a href="compose.yaml">compose.yaml</a>
+│   ├── <a href=".env.example">.env.example</a>
+│   ├── <a href="controller/">controller/</a>
+│   │   ├── <a href="controller/Dockerfile">Dockerfile</a>
+│   │   ├── <a href="controller/server.py">server.py</a>
+│   │   ├── <a href="controller/games.json">games.json</a>
+│   │   └── <a href="controller/static/">static/</a>
+│   ├── <a href="minecraft/">minecraft/</a> · <a href="minecraft/README.md">说明</a>
+│   ├── <a href="palworld/">palworld/</a> · <a href="palworld/README.md">说明</a>
+│   ├── <a href="terraria/">terraria/</a> · <a href="terraria/README.md">说明</a>
+│   └── <a href="zomboid/">zomboid/</a> · <a href="zomboid/README.md">说明</a>
+├── <a href="#deploy">部署说明</a>
+├── <a href="#accounts">管理账号</a>
+├── <a href="#runtime">运行逻辑</a>
+├── <a href="#details">网页详情与玩家管理</a>
+├── <a href="#register">注册其他游戏</a>
+└── <a href="#security">安全说明</a>
+</pre>
+
+<a id="guide"></a>
+## 使用教程
+
+1. 把整个项目复制到 NAS 的一个文件夹，例如 `/volume1/docker/nas_game_server`。
+2. 确认该目录里有 `.env`。没有的话，把 [`.env.example`](.env.example) 复制一份改名为 `.env`。路径如果不是 `/volume1/docker/nas_game_server`，把其中的 `HOST_PROJECT_PATH` 改成实际路径。
+3. 打开群晖 **Container Manager → 项目**，点 **新增**，路径选刚复制的项目文件夹，再点 **添加**。构建并启动后，只会运行总控 `nas-game-controller`。
+4. 浏览器打开 `http://NAS的局域网IP:8088` 进入管理页。默认账号 `admin`，默认密码 `admin123`。
+5. 在管理页点击某个游戏的「启动」。第一次会创建对应容器，之后可随时停止或再启动。
+
+<a id="layout"></a>
 ## 目录结构
 
 点击文件名可直接打开对应内容。`data/`、`backups/` 等运行时目录首次启动游戏时自动创建，仓库里默认不包含。
@@ -32,14 +67,7 @@
   - `server-files/` — Build 42 服务端文件
   - `backups/` — Project Zomboid 最新备份
 
-## 使用教程
-
-1. 把整个项目复制到 NAS 的一个文件夹，例如 `/volume1/docker/nas_game_server`。
-2. 确认该目录里有 `.env`。没有的话，把 [`.env.example`](.env.example) 复制一份改名为 `.env`。路径如果不是 `/volume1/docker/nas_game_server`，把其中的 `HOST_PROJECT_PATH` 改成实际路径。
-3. 打开群晖 **Container Manager → 项目**，点 **新增**，路径选刚复制的项目文件夹，再点 **添加**。构建并启动后，只会运行总控 `nas-game-controller`。
-4. 浏览器打开 `http://NAS的局域网IP:8088` 进入管理页。默认账号 `admin`，默认密码 `admin123`。
-5. 在管理页点击某个游戏的「启动」。第一次会创建对应容器，之后可随时停止或再启动。
-
+<a id="deploy"></a>
 ## 部署说明
 
 若旧的 `minecraft-neoforge` 项目仍在运行，先备份并确认世界位于 `minecraft/data`，再停止并删除旧项目中的 `minecraft-neoforge` 容器。旧版本若还留有 `minecraft-backup` 容器，也可停止并删除；新版已经不再使用它。只删除容器，不要勾选删除数据，也不要删除 `minecraft/data`、`mods`、`installer` 或 `backups` 文件夹。
@@ -61,6 +89,7 @@ docker compose up -d --force-recreate controller
 
 以后更新 `server.py`、`games.json` 或网页文件时执行 `docker restart nas-game-controller` 即可。网页文件更新后再对浏览器执行一次强制刷新，避免浏览器继续显示旧缓存。
 
+<a id="accounts"></a>
 ## 管理账号
 
 管理账号在根目录 `.env` 的 `CONTROL_ACCOUNTS_JSON` 中配置。默认配置为：
@@ -82,6 +111,7 @@ CONTROL_ACCOUNTS_JSON={"admin":"换成高强度密码","family":"另一个密码
 
 如果网页端口冲突，修改 `.env` 的 `CONTROL_PORT` 后重新创建总控容器。不要再把 `minecraft/compose.yaml` 单独创建成常驻项目；它仅保留为旧部署参考。
 
+<a id="runtime"></a>
 ## 运行逻辑
 
 - 总控通过 `/var/run/docker.sock` 访问 Docker Engine，仅允许操作 `controller/games.json` 注册的固定容器名称。
@@ -90,6 +120,7 @@ CONTROL_ACCOUNTS_JSON={"admin":"换成高强度密码","family":"另一个密码
 - 每次启动或停止都会把游戏容器的 Docker 重启策略更新为 `no`。
 - 所有游戏每72小时自动备份，也可在详情页手动备份。备份前会请求游戏保存世界，每个游戏都只保留最新一份；Project Zomboid 输出到 `zomboid/backups/zomboid-latest.tar.gz`。
 
+<a id="details"></a>
 ## 网页详情与玩家管理
 
 - 游戏库采用横向卡片，显示容器实时 CPU、内存占用和游戏目录总大小。
@@ -107,6 +138,7 @@ CONTROL_ACCOUNTS_JSON={"admin":"换成高强度密码","family":"另一个密码
 - 幻兽帕鲁服务端通常需要较多内存。20 GB 总内存的 NAS 不建议同时运行 Minecraft 与幻兽帕鲁，以免系统开始交换内存或杀死容器。
 - Project Zomboid 默认分配 6 GB Java 内存，首次启动还会下载服务端文件。20 GB NAS 上建议大型游戏服务器按需单独运行，不要同时启动 Minecraft、幻兽帕鲁和 Project Zomboid。
 
+<a id="register"></a>
 ## 注册其他游戏
 
 在 `controller/games.json` 的 `games` 数组中添加一个游戏对象即可。每个游戏可以包含一个主服务和多个伴随服务，并使用 `startOrder` 控制启动顺序；停止时自动按相反顺序执行。通用字段包括：
@@ -137,6 +169,7 @@ CONTROL_ACCOUNTS_JSON={"admin":"换成高强度密码","family":"另一个密码
 
 每个游戏还可以配置 `"icon": "/assets/文件名"`。图标应下载到 `controller/static/assets/`，避免 NAS 页面运行时依赖外网。Minecraft 当前使用 Microsoft Store 官方产品素材，来源记录在该目录的 `ATTRIBUTION.md`。
 
+<a id="security"></a>
 ## 安全说明
 
 Docker Socket 等同于较高的 NAS 容器管理权限。本项目没有提供任意容器名称、镜像或命令的网页输入，但总控仍应仅在可信局域网或 VPN 中使用。账号密码登录成功后会签发12小时的临时会话；HTTP 不会加密登录密码或会话，不要直接把 `8088` 转发到公网。需要公网管理时，应使用 Tailscale，或在受信任的 HTTPS 反向代理后访问。

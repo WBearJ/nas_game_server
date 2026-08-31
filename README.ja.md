@@ -4,6 +4,41 @@
 
 このプロジェクトはコントローラーだけを常駐させ、ゲームサーバーを必要なときだけ起動します。NAS またはプロジェクトの起動時に自動起動するのは `nas-game-controller` のみです。Minecraft とその他の登録済みゲームは、Web 画面から起動するまで停止したままです。ゲームコンテナはすべて `restart: no` を使用するため、NAS の再起動後も自動では起動しません。自動バックアップはコントローラー内部で実行され、別のバックアップコンテナは不要です。
 
+**目次**
+
+<pre>
+nas_game_server
+├── <a href="#guide">使い方</a>
+├── <a href="#layout">ディレクトリ構成</a>
+│   ├── <a href="compose.yaml">compose.yaml</a>
+│   ├── <a href=".env.example">.env.example</a>
+│   ├── <a href="controller/">controller/</a>
+│   │   ├── <a href="controller/Dockerfile">Dockerfile</a>
+│   │   ├── <a href="controller/server.py">server.py</a>
+│   │   ├── <a href="controller/games.json">games.json</a>
+│   │   └── <a href="controller/static/">static/</a>
+│   ├── <a href="minecraft/">minecraft/</a> · <a href="minecraft/README.md">説明</a>
+│   ├── <a href="palworld/">palworld/</a> · <a href="palworld/README.md">説明</a>
+│   ├── <a href="terraria/">terraria/</a> · <a href="terraria/README.md">説明</a>
+│   └── <a href="zomboid/">zomboid/</a> · <a href="zomboid/README.md">説明</a>
+├── <a href="#deploy">導入時の補足</a>
+├── <a href="#accounts">管理アカウント</a>
+├── <a href="#runtime">動作仕様</a>
+├── <a href="#details">詳細画面とプレイヤー管理</a>
+├── <a href="#register">ゲームの追加登録</a>
+└── <a href="#security">セキュリティ</a>
+</pre>
+
+<a id="guide"></a>
+## 使い方
+
+1. プロジェクト一式を NAS のフォルダへコピーします。例：`/volume1/docker/nas_game_server`。
+2. そのフォルダに `.env` があることを確認します。なければ [`.env.example`](.env.example) を `.env` にコピーします。パスが `/volume1/docker/nas_game_server` でない場合は、`HOST_PROJECT_PATH` を実際のパスに変更します。
+3. **Container Manager → プロジェクト** を開き、**作成** でコピー先フォルダを指定して **追加** します。ビルドと起動後に動くのはコントローラー `nas-game-controller` だけです。
+4. ブラウザーで `http://NASのLAN-IP:8088` を開き、管理画面に入ります。初期ユーザー名 `admin`、パスワード `admin123`。
+5. 管理画面で任意のゲームの「起動」を選びます。初回はコンテナが作成され、以降はいつでも停止・再起動できます。
+
+<a id="layout"></a>
 ## ディレクトリ構成
 
 名前をクリックすると、そのファイルまたはフォルダを開けます。`data/` や `backups/` などの実行時ディレクトリは初回起動時に自動作成され、リポジトリには含まれません。
@@ -32,14 +67,7 @@
   - `server-files/` — Build 42 サーバー本体
   - `backups/` — Project Zomboid の最新バックアップ
 
-## 使い方
-
-1. プロジェクト一式を NAS のフォルダへコピーします。例：`/volume1/docker/nas_game_server`。
-2. そのフォルダに `.env` があることを確認します。なければ [`.env.example`](.env.example) を `.env` にコピーします。パスが `/volume1/docker/nas_game_server` でない場合は、`HOST_PROJECT_PATH` を実際のパスに変更します。
-3. **Container Manager → プロジェクト** を開き、**作成** でコピー先フォルダを指定して **追加** します。ビルドと起動後に動くのはコントローラー `nas-game-controller` だけです。
-4. ブラウザーで `http://NASのLAN-IP:8088` を開き、管理画面に入ります。初期ユーザー名 `admin`、パスワード `admin123`。
-5. 管理画面で任意のゲームの「起動」を選びます。初回はコンテナが作成され、以降はいつでも停止・再起動できます。
-
+<a id="deploy"></a>
 ## 導入時の補足
 
 古い `minecraft-neoforge` プロジェクトが動作中の場合はバックアップを作成し、ワールドが `minecraft/data` にあることを確認してから古いコンテナを停止・削除します。旧 `minecraft-backup` コンテナも削除できます。コンテナだけを削除し、データや `minecraft/data`、`mods`、`installer`、`backups` は削除しないでください。
@@ -59,6 +87,7 @@ docker restart nas-game-controller
 
 Web ファイル更新後は、古いキャッシュを使わないようブラウザーを強制再読み込みしてください。
 
+<a id="accounts"></a>
 ## 管理アカウント
 
 ルートの `.env` で設定します。
@@ -78,6 +107,7 @@ CONTROL_ACCOUNTS_JSON={"admin":"strong-password","family":"another-password","op
 
 画面に「移行が必要」と表示される場合、管理対象外の同名コンテナが残っています。データを保持したまま古いコンテナを削除し、画面を更新してください。Web ポートが競合する場合は `.env` の `CONTROL_PORT` を変更してコントローラーを再作成します。`minecraft/compose.yaml` は旧構成の参考用であり、常駐プロジェクトとして別途起動しないでください。
 
+<a id="runtime"></a>
 ## 動作仕様
 
 - コントローラーは `/var/run/docker.sock` 経由で Docker Engine に接続し、`controller/games.json` に登録された固定コンテナ名だけを操作します。
@@ -86,6 +116,7 @@ CONTROL_ACCOUNTS_JSON={"admin":"strong-password","family":"another-password","op
 - 起動または停止のたびに、ゲームコンテナの再起動ポリシーを `no` にします。
 - すべてのゲームを 72 時間ごとに自動バックアップでき、手動バックアップにも対応します。先にワールド保存を要求し、最新の 1 件だけを保持します。Project Zomboid は `zomboid/backups/zomboid-latest.tar.gz` を使用します。
 
+<a id="details"></a>
 ## 詳細画面とプレイヤー管理
 
 - ゲームカードには CPU、メモリ、ゲームディレクトリ全体のサイズが表示されます。
@@ -101,6 +132,7 @@ CONTROL_ACCOUNTS_JSON={"admin":"strong-password","family":"another-password","op
 - Project Zomboid は Build 42 と RCON を使用します。外部接続には UDP `16261`–`16263` が必要で、RCON TCP `27016` は NAS ローカル専用です。
 - Palworld と Project Zomboid は多くのメモリを使用します。20 GB の NAS では大型サーバーを必要なときだけ個別に実行し、Minecraft、Palworld、Project Zomboid の同時実行は避けてください。
 
+<a id="register"></a>
 ## ゲームの追加登録
 
 `controller/games.json` の `games` 配列へゲームオブジェクトを追加します。1 つのゲームにプライマリサービスと複数の付随サービスを設定でき、`startOrder` が起動順を制御します。停止時は逆順です。
@@ -119,6 +151,7 @@ CONTROL_ACCOUNTS_JSON={"admin":"strong-password","family":"another-password","op
 
 登録ファイルは `${ENV_NAME:-default}` 形式に対応します。新しい環境変数はルートの `compose.yaml` からコントローラーへ渡してください。変更後に `nas-game-controller` を再起動します。登録しただけではゲームは起動しません。`"icon": "/assets/file.png"` で `controller/static/assets/` 内のローカル画像を指定できます。
 
+<a id="security"></a>
 ## セキュリティ
 
 Docker Socket へのアクセスには高いコンテナ管理権限があります。画面から任意のコンテナ名、イメージ、コマンドを入力することはできませんが、コントローラーは信頼できる LAN または VPN 内だけで使用してください。ログイン後の一時セッションは 12 時間有効です。HTTP は認証情報やセッションを暗号化しないため、`8088` をインターネットへ直接公開しないでください。リモート管理には Tailscale または信頼できる HTTPS リバースプロキシを使用してください。

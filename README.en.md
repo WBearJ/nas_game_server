@@ -4,6 +4,41 @@
 
 This project keeps only the controller running and starts game servers on demand. When the NAS or project starts, only `nas-game-controller` starts automatically. Minecraft and every other registered game remain stopped until you start them from the web interface. Game containers use `restart: no`, so they remain stopped after a NAS reboot. Automatic backups are scheduled inside the controller and require no separate backup container.
 
+**Contents**
+
+<pre>
+nas_game_server
+├── <a href="#guide">Quick start</a>
+├── <a href="#layout">Project layout</a>
+│   ├── <a href="compose.yaml">compose.yaml</a>
+│   ├── <a href=".env.example">.env.example</a>
+│   ├── <a href="controller/">controller/</a>
+│   │   ├── <a href="controller/Dockerfile">Dockerfile</a>
+│   │   ├── <a href="controller/server.py">server.py</a>
+│   │   ├── <a href="controller/games.json">games.json</a>
+│   │   └── <a href="controller/static/">static/</a>
+│   ├── <a href="minecraft/">minecraft/</a> · <a href="minecraft/README.md">notes</a>
+│   ├── <a href="palworld/">palworld/</a> · <a href="palworld/README.md">notes</a>
+│   ├── <a href="terraria/">terraria/</a> · <a href="terraria/README.md">notes</a>
+│   └── <a href="zomboid/">zomboid/</a> · <a href="zomboid/README.md">notes</a>
+├── <a href="#deploy">Deploy notes</a>
+├── <a href="#accounts">Administrator accounts</a>
+├── <a href="#runtime">Runtime behavior</a>
+├── <a href="#details">Details and player management</a>
+├── <a href="#register">Register another game</a>
+└── <a href="#security">Security</a>
+</pre>
+
+<a id="guide"></a>
+## Quick start
+
+1. Copy the whole project into a folder on the NAS, for example `/volume1/docker/nas_game_server`.
+2. Make sure that folder contains `.env`. If not, copy [`.env.example`](.env.example) to `.env`. If the path is not `/volume1/docker/nas_game_server`, set `HOST_PROJECT_PATH` to the real path.
+3. Open **Container Manager → Project**, choose **Create**, set the path to that folder, then **Add**. After build and start, only `nas-game-controller` should run.
+4. Open `http://NAS-LAN-IP:8088` in a browser. Default username `admin`, password `admin123`.
+5. Select **Start** on a game. The first start creates its containers; later you can stop or start it again at any time.
+
+<a id="layout"></a>
 ## Project layout
 
 Click a name to open that file or folder. Runtime directories such as `data/` and `backups/` are created on first start and are not stored in the repository.
@@ -32,14 +67,7 @@ Click a name to open that file or folder. Runtime directories such as `data/` an
   - `server-files/` — Build 42 server files
   - `backups/` — Latest Project Zomboid backup
 
-## Quick start
-
-1. Copy the whole project into a folder on the NAS, for example `/volume1/docker/nas_game_server`.
-2. Make sure that folder contains `.env`. If not, copy [`.env.example`](.env.example) to `.env`. If the path is not `/volume1/docker/nas_game_server`, set `HOST_PROJECT_PATH` to the real path.
-3. Open **Container Manager → Project**, choose **Create**, set the path to that folder, then **Add**. After build and start, only `nas-game-controller` should run.
-4. Open `http://NAS-LAN-IP:8088` in a browser. Default username `admin`, password `admin123`.
-5. Select **Start** on a game. The first start creates its containers; later you can stop or start it again at any time.
-
+<a id="deploy"></a>
 ## Deploy notes
 
 If an older `minecraft-neoforge` project is running, back it up, confirm that its world is in `minecraft/data`, then stop and remove the old `minecraft-neoforge` container. You may also remove the obsolete `minecraft-backup` container. Remove containers only: do not delete their data or the `minecraft/data`, `mods`, `installer`, or `backups` directories.
@@ -59,6 +87,7 @@ docker restart nas-game-controller
 
 Force-refresh the browser after updating web files to avoid stale cached assets.
 
+<a id="accounts"></a>
 ## Administrator accounts
 
 Configure accounts with `CONTROL_ACCOUNTS_JSON` in the root `.env`:
@@ -78,6 +107,7 @@ Usernames may contain letters, numbers, dots, hyphens, and underscores and are l
 
 “Migration required” means an unmanaged old container has the same name. Remove that container while keeping its data, then refresh. If the web port conflicts, change `CONTROL_PORT` in `.env` and recreate the controller. Do not deploy `minecraft/compose.yaml` as another permanent project; it remains only as a legacy reference.
 
+<a id="runtime"></a>
 ## Runtime behavior
 
 - The controller accesses Docker Engine through `/var/run/docker.sock` and can operate only fixed container names registered in `controller/games.json`.
@@ -86,6 +116,7 @@ Usernames may contain letters, numbers, dots, hyphens, and underscores and are l
 - Every start or stop sets the game container restart policy to `no`.
 - Every game is backed up automatically every 72 hours and can also be backed up manually. A world save is requested first, and only the latest archive is retained. Project Zomboid uses `zomboid/backups/zomboid-latest.tar.gz`.
 
+<a id="details"></a>
 ## Details and player management
 
 - Game cards show live CPU, memory, and total game-directory size.
@@ -101,6 +132,7 @@ Usernames may contain letters, numbers, dots, hyphens, and underscores and are l
 - Project Zomboid uses an automatically updated Build 42 image and supports RCON players, kick, ban, announcements, saves, backups, and Workshop/Mod IDs. Internet play needs UDP `16261`–`16263`; RCON TCP `27016` is NAS-local only.
 - Palworld and Project Zomboid require substantial memory. On a 20 GB NAS, run large servers on demand and avoid running Minecraft, Palworld, and Project Zomboid simultaneously.
 
+<a id="register"></a>
 ## Register another game
 
 Add a game object to the `games` array in `controller/games.json`. A game can contain one primary service and companion services. `startOrder` controls start order; stop order is reversed automatically.
@@ -129,6 +161,7 @@ Add a game object to the `games` array in `controller/games.json`. A game can co
 
 The registry supports `${ENV_NAME:-default}` templates. Pass every new variable through the root `compose.yaml`. Restart `nas-game-controller` after editing the registry. Registering a game never starts it automatically. An optional `"icon": "/assets/file.png"` points to a local icon in `controller/static/assets/`; avoid runtime dependencies on external sites.
 
+<a id="security"></a>
 ## Security
 
 Docker Socket access effectively grants elevated container-management privileges. The UI does not accept arbitrary container names, images, or commands, but the controller must still be used only on a trusted LAN or VPN. Successful login creates a temporary 12-hour session. Plain HTTP does not encrypt credentials or sessions, so never expose port `8088` directly to the internet. For remote administration, use Tailscale or a trusted HTTPS reverse proxy.
