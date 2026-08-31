@@ -4,29 +4,45 @@
 
 本專案採用「總控常駐、遊戲按需啟動」的方式運行。NAS 或專案首次啟動時只有 `nas-game-controller` 自動啟動；Minecraft 和其他已註冊的遊戲服務不會自動啟動。遊戲容器統一使用 `restart: no`，因此 NAS 重新啟動後仍會保持停止，直到你再次於網頁啟動。自動備份由總控內部排程負責，不需要額外的備份容器。
 
-## 目前結構
+## 目錄結構
 
-```text
-nas_game_server/
-├── compose.yaml              # 只啟動網頁總控
-├── .env                      # 管理帳號、NAS 路徑和遊戲參數
-├── config/game-settings.json # 網頁儲存的常用設定
-├── controller/               # Docker 控制 API、註冊表和網頁
-├── minecraft/                # 世界、Mod、安裝程式和備份
-├── palworld/                 # 伺服器、設定、世界和備份
-├── terraria/                 # 世界、TShock 設定、外掛和備份
-└── zomboid/                  # 存檔、Build 42 檔案、Workshop 資料和備份
-```
+點選檔名即可開啟對應內容。`data/`、`backups/` 等執行時目錄會在首次啟動遊戲時自動建立，倉庫預設不包含。
 
-## Synology 部署
+- [`compose.yaml`](compose.yaml) — 只啟動網頁總控
+- [`.env.example`](.env.example) — 管理帳號、NAS 路徑和遊戲參數範本，複製為 `.env` 後使用
+- `config/game-settings.json` — 網頁儲存的常用設定（執行後產生）
+- [`controller/`](controller/)
+  - [`Dockerfile`](controller/Dockerfile)
+  - [`server.py`](controller/server.py) — Docker 控制 API 與靜態檔案服務
+  - [`games.json`](controller/games.json) — 遊戲、資料路徑和容器註冊表
+  - [`static/`](controller/static/) — 網頁控制面板與本機遊戲圖示
+- [`minecraft/`](minecraft/) — [說明](minecraft/README.md)
+  - `data/` — 世界和伺服器資料
+  - [`mods/`](minecraft/mods/) — NeoForge 模組
+  - [`installer/`](minecraft/installer/) — 離線 NeoForge 安裝程式
+  - `backups/` — 自動與手動備份，只保留 latest
+- [`palworld/`](palworld/) — [說明](palworld/README.md)
+  - `data/` — Steam 伺服器、設定與世界存檔
+  - `backups/` — Palworld 最新備份
+- [`terraria/`](terraria/) — [說明](terraria/README.md)
+  - `data/` — 世界、TShock 設定與外掛
+  - `backups/` — Terraria 最新備份
+- [`zomboid/`](zomboid/) — [說明](zomboid/README.md)
+  - `data/` — 存檔、設定和 Workshop 資料
+  - `server-files/` — Build 42 伺服器檔案
+  - `backups/` — Project Zomboid 最新備份
 
-1. 將整個目錄上傳到 `/volume1/docker/nas_game_server`。若使用其他路徑，請同步修改 `.env` 的 `HOST_PROJECT_PATH`。
-2. 開啟 `.env`，確認管理帳號、`EULA=TRUE`、記憶體、連接埠和 Minecraft 參數。預設帳號為 `admin`，密碼為 `admin123`。
-3. 若舊的 `minecraft-neoforge` 專案仍在運行，先備份並確認世界位於 `minecraft/data`，再停止並刪除舊容器。舊版 `minecraft-backup` 容器也可刪除。只刪除容器，不要刪除資料或 `minecraft/data`、`mods`、`installer`、`backups` 目錄。
-4. 開啟 **Container Manager → 專案 → 新增**，專案名稱填寫 `nas-game-server`，選擇根目錄並使用其中的 `compose.yaml`。
-5. 建置並啟動專案，此時只會運行 `nas-game-controller`。
-6. 在可信任的區域網路或 VPN 中開啟 `http://NAS區域網路IP:8088`，使用 `.env` 中的帳號登入。
-7. 點選任一遊戲的「啟動」。第一次會建立對應容器，之後可直接啟動、停止或重新啟動。
+## 使用教學
+
+1. 把整個專案複製到 NAS 的一個資料夾，例如 `/volume1/docker/nas_game_server`。
+2. 確認該目錄裡有 `.env`。沒有的話，把 [`.env.example`](.env.example) 複製一份改名為 `.env`。路徑如果不是 `/volume1/docker/nas_game_server`，把其中的 `HOST_PROJECT_PATH` 改成實際路徑。
+3. 開啟 Synology **Container Manager → 專案**，點 **新增**，路徑選剛複製的專案資料夾，再點 **加入**。建置並啟動後，只會運行總控 `nas-game-controller`。
+4. 瀏覽器開啟 `http://NAS的區域網路IP:8088` 進入管理頁。預設帳號 `admin`，預設密碼 `admin123`。
+5. 在管理頁點選某個遊戲的「啟動」。第一次會建立對應容器，之後可隨時停止或再啟動。
+
+## 部署說明
+
+若舊的 `minecraft-neoforge` 專案仍在運行，先備份並確認世界位於 `minecraft/data`，再停止並刪除舊容器。舊版 `minecraft-backup` 容器也可刪除。只刪除容器，不要刪除資料或 `minecraft/data`、`mods`、`installer`、`backups` 目錄。
 
 Palworld REST 管理密碼 `PALWORLD_ADMIN_PASSWORD` 預設也是 `admin123`，它與網頁管理帳號是兩套獨立設定。正式使用時請分別改成不同的高強度密碼。遊戲使用 UDP `8211`，Steam 查詢使用 UDP `27015`；允許網際網路玩家加入時，必須同時在路由器和 Synology 防火牆放行。REST 連接埠 `8212` 未發布，不要轉送到網際網路。
 

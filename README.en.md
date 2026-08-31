@@ -6,42 +6,43 @@ This project keeps only the controller running and starts game servers on demand
 
 ## Project layout
 
-```text
-nas_game_server/
-├── compose.yaml              # Starts only the web controller
-├── .env                      # Admin accounts, NAS paths, and game options
-├── config/game-settings.json # Common settings saved from the web UI
-├── controller/
-│   ├── Dockerfile
-│   ├── server.py             # Docker control API and static file server
-│   ├── games.json            # Game, data path, and container registry
-│   └── static/               # Web dashboard and local game icons
-├── minecraft/
-│   ├── data/                 # World and server data
-│   ├── mods/                 # NeoForge mods
-│   ├── installer/            # Offline NeoForge installer
-│   └── backups/              # Latest automatic or manual backup
-├── palworld/
-│   ├── data/                 # Steam server, configuration, and world save
-│   └── backups/              # Latest Palworld backup
-├── terraria/
-│   ├── data/                 # World, TShock configuration, and plugins
-│   └── backups/              # Latest Terraria backup
-└── zomboid/
-    ├── data/                 # Saves, configuration, and Workshop data
-    ├── server-files/         # Build 42 server files
-    └── backups/              # Latest Project Zomboid backup
-```
+Click a name to open that file or folder. Runtime directories such as `data/` and `backups/` are created on first start and are not stored in the repository.
 
-## Deploy on Synology
+- [`compose.yaml`](compose.yaml) — Starts only the web controller
+- [`.env.example`](.env.example) — Template for admin accounts, NAS paths, and game options; copy to `.env`
+- `config/game-settings.json` — Common settings saved from the web UI (created at runtime)
+- [`controller/`](controller/)
+  - [`Dockerfile`](controller/Dockerfile)
+  - [`server.py`](controller/server.py) — Docker control API and static file server
+  - [`games.json`](controller/games.json) — Game, data path, and container registry
+  - [`static/`](controller/static/) — Web dashboard and local game icons
+- [`minecraft/`](minecraft/) — [Notes](minecraft/README.md)
+  - `data/` — World and server data
+  - [`mods/`](minecraft/mods/) — NeoForge mods
+  - [`installer/`](minecraft/installer/) — Offline NeoForge installer
+  - `backups/` — Latest automatic or manual backup
+- [`palworld/`](palworld/) — [Notes](palworld/README.md)
+  - `data/` — Steam server, configuration, and world save
+  - `backups/` — Latest Palworld backup
+- [`terraria/`](terraria/) — [Notes](terraria/README.md)
+  - `data/` — World, TShock configuration, and plugins
+  - `backups/` — Latest Terraria backup
+- [`zomboid/`](zomboid/) — [Notes](zomboid/README.md)
+  - `data/` — Saves, configuration, and Workshop data
+  - `server-files/` — Build 42 server files
+  - `backups/` — Latest Project Zomboid backup
 
-1. Upload the entire directory to `/volume1/docker/nas_game_server`. If you use another path, update `HOST_PROJECT_PATH` in `.env`.
-2. Open `.env` and verify the admin accounts, `EULA=TRUE`, memory, ports, and Minecraft options. The defaults are username `admin` and password `admin123`.
-3. If an older `minecraft-neoforge` project is running, back it up, confirm that its world is in `minecraft/data`, then stop and remove the old `minecraft-neoforge` container. You may also remove the obsolete `minecraft-backup` container. Remove containers only: do not delete their data or the `minecraft/data`, `mods`, `installer`, or `backups` directories.
-4. Open **Container Manager → Project → Create**, use `nas-game-server` as the project name, select the project root, and use its `compose.yaml`.
-5. Build and start the project. Only `nas-game-controller` should appear and run.
-6. On a trusted LAN or VPN, open `http://NAS-LAN-IP:8088` and sign in with an account from `.env`.
-7. Select **Start** for any game. The first start creates its containers; later you can start, stop, or restart it directly.
+## Quick start
+
+1. Copy the whole project into a folder on the NAS, for example `/volume1/docker/nas_game_server`.
+2. Make sure that folder contains `.env`. If not, copy [`.env.example`](.env.example) to `.env`. If the path is not `/volume1/docker/nas_game_server`, set `HOST_PROJECT_PATH` to the real path.
+3. Open **Container Manager → Project**, choose **Create**, set the path to that folder, then **Add**. After build and start, only `nas-game-controller` should run.
+4. Open `http://NAS-LAN-IP:8088` in a browser. Default username `admin`, password `admin123`.
+5. Select **Start** on a game. The first start creates its containers; later you can stop or start it again at any time.
+
+## Deploy notes
+
+If an older `minecraft-neoforge` project is running, back it up, confirm that its world is in `minecraft/data`, then stop and remove the old `minecraft-neoforge` container. You may also remove the obsolete `minecraft-backup` container. Remove containers only: do not delete their data or the `minecraft/data`, `mods`, `installer`, or `backups` directories.
 
 The Palworld REST administration password, `PALWORLD_ADMIN_PASSWORD`, also defaults to `admin123`. It is separate from the web admin password. Change both to different strong passwords for regular use. Palworld uses UDP `8211` and Steam queries use UDP `27015`. To allow internet players, open both ports in the router and Synology firewall. REST port `8212` is not published and must not be forwarded to the internet.
 

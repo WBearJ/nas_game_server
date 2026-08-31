@@ -4,44 +4,45 @@
 
 该项目采用“总控常驻、游戏按需启动”的方式运行。NAS 或项目首次启动时只有 `nas-game-controller` 自动启动；Minecraft 和以后注册的其他游戏服务都不会自动启动。游戏容器由网页端创建和控制，并统一使用 `restart: no`，因此 NAS 重启后仍保持停止，直到你再次点击启动。自动备份由总控内部定时器负责，不需要额外的备份容器。
 
-## 当前结构
+## 目录结构
 
-```text
-nas_game_server/
-├── compose.yaml              # 只启动网页总控
-├── .env                      # 管理账号、NAS 路径和游戏参数
-├── config/game-settings.json # 网页保存的游戏常用配置
-├── controller/
-│   ├── Dockerfile
-│   ├── server.py             # Docker 控制 API 与静态文件服务
-│   ├── games.json            # 游戏、数据路径和容器注册表
-│   └── static/               # 网页控制面板与本地游戏图标
-├── minecraft/
-    ├── data/                 # 世界和服务端数据
-    ├── mods/                 # NeoForge 模组
-    ├── installer/            # 离线 NeoForge 安装器
-    └── backups/              # 自动与手动备份，只保留 latest
-└── palworld/
-    ├── data/                 # Steam 服务端、配置与世界存档
-    └── backups/              # 帕鲁最新备份
-└── terraria/
-    ├── data/                 # 世界、TShock 配置与插件
-    └── backups/              # Terraria 最新备份
-└── zomboid/
-    ├── data/                 # 存档、配置和 Workshop 数据
-    ├── server-files/         # Build 42 服务端文件
-    └── backups/              # Project Zomboid 最新备份
-```
+点击文件名可直接打开对应内容。`data/`、`backups/` 等运行时目录首次启动游戏时自动创建，仓库里默认不包含。
 
-## 群晖部署
+- [`compose.yaml`](compose.yaml) — 只启动网页总控
+- [`.env.example`](.env.example) — 管理账号、NAS 路径和游戏参数模板，复制为 `.env` 后使用
+- `config/game-settings.json` — 网页保存的游戏常用配置（运行后生成）
+- [`controller/`](controller/)
+  - [`Dockerfile`](controller/Dockerfile)
+  - [`server.py`](controller/server.py) — Docker 控制 API 与静态文件服务
+  - [`games.json`](controller/games.json) — 游戏、数据路径和容器注册表
+  - [`static/`](controller/static/) — 网页控制面板与本地游戏图标
+- [`minecraft/`](minecraft/) — [说明](minecraft/README.md)
+  - `data/` — 世界和服务端数据
+  - [`mods/`](minecraft/mods/) — NeoForge 模组
+  - [`installer/`](minecraft/installer/) — 离线 NeoForge 安装器
+  - `backups/` — 自动与手动备份，只保留 latest
+- [`palworld/`](palworld/) — [说明](palworld/README.md)
+  - `data/` — Steam 服务端、配置与世界存档
+  - `backups/` — 帕鲁最新备份
+- [`terraria/`](terraria/) — [说明](terraria/README.md)
+  - `data/` — 世界、TShock 配置与插件
+  - `backups/` — Terraria 最新备份
+- [`zomboid/`](zomboid/) — [说明](zomboid/README.md)
+  - `data/` — 存档、配置和 Workshop 数据
+  - `server-files/` — Build 42 服务端文件
+  - `backups/` — Project Zomboid 最新备份
 
-1. 将整个目录上传为 `/volume1/docker/nas_game_server`。如果使用其他路径，必须同步修改 `.env` 的 `HOST_PROJECT_PATH`。
-2. 打开 `.env`，确认管理账号、`EULA=TRUE`、内存、端口和 Minecraft 参数。默认账号为 `admin`，默认密码为 `admin123`。
-3. 若旧的 `minecraft-neoforge` 项目仍在运行，先备份并确认世界位于 `minecraft/data`，再停止并删除旧项目中的 `minecraft-neoforge` 容器。旧版本若还留有 `minecraft-backup` 容器，也可停止并删除；新版已经不再使用它。只删除容器，不要勾选删除数据，也不要删除 `minecraft/data`、`mods`、`installer` 或 `backups` 文件夹。
-4. 打开 **Container Manager → 项目 → 新增**，项目名称填写 `nas-game-server`，路径选择根目录，使用根目录的 `compose.yaml`。
-5. 构建并启动项目。此时只会出现并运行 `nas-game-controller`。
-6. 在可信局域网或 VPN 中访问 `http://NAS局域网IP:8088`，使用 `.env` 中配置的账号密码登录。
-7. 点击任意游戏的“启动”。第一次点击会创建对应游戏容器；以后可以直接启动、停止或重启。
+## 使用教程
+
+1. 把整个项目复制到 NAS 的一个文件夹，例如 `/volume1/docker/nas_game_server`。
+2. 确认该目录里有 `.env`。没有的话，把 [`.env.example`](.env.example) 复制一份改名为 `.env`。路径如果不是 `/volume1/docker/nas_game_server`，把其中的 `HOST_PROJECT_PATH` 改成实际路径。
+3. 打开群晖 **Container Manager → 项目**，点 **新增**，路径选刚复制的项目文件夹，再点 **添加**。构建并启动后，只会运行总控 `nas-game-controller`。
+4. 浏览器打开 `http://NAS的局域网IP:8088` 进入管理页。默认账号 `admin`，默认密码 `admin123`。
+5. 在管理页点击某个游戏的「启动」。第一次会创建对应容器，之后可随时停止或再启动。
+
+## 部署说明
+
+若旧的 `minecraft-neoforge` 项目仍在运行，先备份并确认世界位于 `minecraft/data`，再停止并删除旧项目中的 `minecraft-neoforge` 容器。旧版本若还留有 `minecraft-backup` 容器，也可停止并删除；新版已经不再使用它。只删除容器，不要勾选删除数据，也不要删除 `minecraft/data`、`mods`、`installer` 或 `backups` 文件夹。
 
 幻兽帕鲁内部 REST 管理密码 `PALWORLD_ADMIN_PASSWORD` 默认也是 `admin123`，首次部署可以直接启动。它与网页管理账号是两个独立配置；正式使用时建议分别改成不同的高强度密码并重新创建总控。游戏默认使用 UDP `8211`，Steam 查询使用 UDP `27015`；若要让公网玩家加入，需要在路由器和群晖防火墙中同时放行对应 UDP 端口。REST 管理端口 `8212` 没有发布，不要自行转发到公网。
 
@@ -77,7 +78,7 @@ CONTROL_ACCOUNTS_JSON={"admin":"换成高强度密码","family":"另一个密码
 
 账号只能使用英文字母、数字、点、横线和下划线，最长32个字符。密码写在 JSON 字符串中，若包含双引号或反斜杠，需要按 JSON 规则转义。修改账号后执行 `docker compose up -d --force-recreate controller`；已有网页会话会立即失效，需要重新登录。默认密码只适合可信局域网内首次使用，建议部署后尽快修改。
 
-如果页面显示“需迁移”，说明仍存在同名旧容器。按第3步删除旧容器后刷新页面即可；总控不会擅自接管或删除非本项目创建的容器。
+如果页面显示“需迁移”，说明仍存在同名旧容器。删除旧容器并保留数据后刷新页面即可；总控不会擅自接管或删除非本项目创建的容器。
 
 如果网页端口冲突，修改 `.env` 的 `CONTROL_PORT` 后重新创建总控容器。不要再把 `minecraft/compose.yaml` 单独创建成常驻项目；它仅保留为旧部署参考。
 

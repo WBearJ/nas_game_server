@@ -6,27 +6,43 @@
 
 ## ディレクトリ構成
 
-```text
-nas_game_server/
-├── compose.yaml              # Web コントローラーのみを起動
-├── .env                      # 管理アカウント、NAS パス、ゲーム設定
-├── config/game-settings.json # Web 画面で保存した一般設定
-├── controller/               # Docker API、ゲーム登録、Web 画面
-├── minecraft/                # ワールド、Mod、インストーラー、バックアップ
-├── palworld/                 # サーバー、設定、ワールド、バックアップ
-├── terraria/                 # ワールド、TShock 設定、プラグイン、バックアップ
-└── zomboid/                  # セーブ、Build 42、Workshop データ、バックアップ
-```
+名前をクリックすると、そのファイルまたはフォルダを開けます。`data/` や `backups/` などの実行時ディレクトリは初回起動時に自動作成され、リポジトリには含まれません。
 
-## Synology への導入
+- [`compose.yaml`](compose.yaml) — Web コントローラーのみを起動
+- [`.env.example`](.env.example) — 管理アカウント、NAS パス、ゲーム設定のテンプレート。`.env` にコピーして使用
+- `config/game-settings.json` — Web 画面で保存した一般設定（実行後に生成）
+- [`controller/`](controller/)
+  - [`Dockerfile`](controller/Dockerfile)
+  - [`server.py`](controller/server.py) — Docker 制御 API と静的ファイル配信
+  - [`games.json`](controller/games.json) — ゲーム、データパス、コンテナ登録
+  - [`static/`](controller/static/) — Web 管理画面とローカルのゲームアイコン
+- [`minecraft/`](minecraft/) — [説明](minecraft/README.md)
+  - `data/` — ワールドとサーバーデータ
+  - [`mods/`](minecraft/mods/) — NeoForge Mod
+  - [`installer/`](minecraft/installer/) — オフライン NeoForge インストーラー
+  - `backups/` — 自動・手動バックアップ（最新 1 件のみ）
+- [`palworld/`](palworld/) — [説明](palworld/README.md)
+  - `data/` — Steam サーバー、設定、ワールドセーブ
+  - `backups/` — Palworld の最新バックアップ
+- [`terraria/`](terraria/) — [説明](terraria/README.md)
+  - `data/` — ワールド、TShock 設定、プラグイン
+  - `backups/` — Terraria の最新バックアップ
+- [`zomboid/`](zomboid/) — [説明](zomboid/README.md)
+  - `data/` — セーブ、設定、Workshop データ
+  - `server-files/` — Build 42 サーバー本体
+  - `backups/` — Project Zomboid の最新バックアップ
 
-1. ディレクトリ全体を `/volume1/docker/nas_game_server` にアップロードします。別のパスを使う場合は `.env` の `HOST_PROJECT_PATH` も変更してください。
-2. `.env` を開き、管理アカウント、`EULA=TRUE`、メモリ、ポート、Minecraft の設定を確認します。初期アカウントは `admin`、パスワードは `admin123` です。
-3. 古い `minecraft-neoforge` プロジェクトが動作中の場合はバックアップを作成し、ワールドが `minecraft/data` にあることを確認してから古いコンテナを停止・削除します。旧 `minecraft-backup` コンテナも削除できます。コンテナだけを削除し、データや `minecraft/data`、`mods`、`installer`、`backups` は削除しないでください。
-4. **Container Manager → プロジェクト → 作成**を開き、プロジェクト名に `nas-game-server` を入力し、ルートディレクトリの `compose.yaml` を使用します。
-5. プロジェクトをビルドして起動します。実行されるのは `nas-game-controller` だけです。
-6. 信頼できる LAN または VPN から `http://NASのLAN-IP:8088` を開き、`.env` のアカウントでログインします。
-7. 任意のゲームで「起動」を選択します。初回はコンテナが作成され、以降は直接起動、停止、再起動できます。
+## 使い方
+
+1. プロジェクト一式を NAS のフォルダへコピーします。例：`/volume1/docker/nas_game_server`。
+2. そのフォルダに `.env` があることを確認します。なければ [`.env.example`](.env.example) を `.env` にコピーします。パスが `/volume1/docker/nas_game_server` でない場合は、`HOST_PROJECT_PATH` を実際のパスに変更します。
+3. **Container Manager → プロジェクト** を開き、**作成** でコピー先フォルダを指定して **追加** します。ビルドと起動後に動くのはコントローラー `nas-game-controller` だけです。
+4. ブラウザーで `http://NASのLAN-IP:8088` を開き、管理画面に入ります。初期ユーザー名 `admin`、パスワード `admin123`。
+5. 管理画面で任意のゲームの「起動」を選びます。初回はコンテナが作成され、以降はいつでも停止・再起動できます。
+
+## 導入時の補足
+
+古い `minecraft-neoforge` プロジェクトが動作中の場合はバックアップを作成し、ワールドが `minecraft/data` にあることを確認してから古いコンテナを停止・削除します。旧 `minecraft-backup` コンテナも削除できます。コンテナだけを削除し、データや `minecraft/data`、`mods`、`installer`、`backups` は削除しないでください。
 
 Palworld の REST 管理パスワード `PALWORLD_ADMIN_PASSWORD` も初期値は `admin123` です。Web 管理アカウントとは別の設定なので、通常利用前にそれぞれ異なる強力なパスワードへ変更してください。ゲームは UDP `8211`、Steam クエリは UDP `27015` を使用します。インターネットから接続させる場合は、ルーターと Synology ファイアウォールの両方で許可してください。REST ポート `8212` は公開されていないため、インターネットへ転送しないでください。
 
