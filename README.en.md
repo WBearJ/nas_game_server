@@ -93,7 +93,7 @@ Click a name to open that file or folder. Runtime directories such as `data/` an
 
 If an older `minecraft-neoforge` project is running, back it up, confirm that its world is in `minecraft/data`, then stop and remove the old `minecraft-neoforge` container. You may also remove the obsolete `minecraft-backup` container. Remove containers only: do not delete their data or the `minecraft/data`, `mods`, `installer`, or `backups` directories.
 
-The Palworld REST administration password, `PALWORLD_ADMIN_PASSWORD`, also defaults to `admin123`. It is separate from the web admin password. Palworld uses UDP `8211` and Steam queries use UDP `27015`. To allow internet players, open both ports in the router and Synology firewall. REST port `8212` is not published and must not be forwarded to the internet.
+The Palworld REST administration password, `PALWORLD_ADMIN_PASSWORD`, also defaults to `admin123`. It is separate from the web admin password. The LAN game port is UDP `8211` and Steam queries use UDP `27015`. REST port `8212` is used only inside the container.
 
 Start, stop, and restart operations run in the background. Open **Logs** from the home page to view all games, or open it from a game details page to preselect that game. The log view refreshes every two seconds. During a slow first start, controller logs show directory checks, image download progress, container creation, and the start command. Do not repeatedly select Start while this is in progress.
 
@@ -149,8 +149,8 @@ Usernames may contain letters, numbers, dots, hyphens, and underscores and are l
 - **Save world** runs `save-all flush`. **Back up now** creates a consistent archive in the background.
 - Minecraft mods can be uploaded or removed from the details page. Only `.jar` files up to 512 MB are accepted; restart Minecraft after changing the mod set.
 - Palworld details show server version, world GUID, FPS, frame time, world days, settings, and player account/IP/level/ping/building/location data. Players may be kicked or banned.
-- Terraria uses a stable TShock image and supports players, IPs, account groups, kick, ban, announcements, saves, and backups. Game port TCP `7777` may be published; management port `7878` is bound only to the NAS and must not be forwarded.
-- Project Zomboid uses an automatically updated Build 42 image and supports RCON players, kick, ban, announcements, saves, backups, and Workshop/Mod IDs. Internet play needs UDP `16261`–`16263`; RCON TCP `27016` is NAS-local only.
+- Terraria uses a stable TShock image and supports players, IPs, account groups, kick, ban, announcements, saves, and backups. The LAN game port is TCP `7777`; management port `7878` is bound only to the NAS.
+- Project Zomboid uses an automatically updated Build 42 image and supports RCON players, kick, ban, announcements, saves, backups, and Workshop/Mod IDs. LAN game ports are UDP `16261`–`16263`; RCON TCP `27016` is bound only to the NAS.
 - See **Resource use** for typical RAM. Game cards also show live CPU, memory, and directory size.
 
 <a id="register"></a>
@@ -185,9 +185,9 @@ The registry supports `${ENV_NAME:-default}` templates. Pass every new variable 
 <a id="security"></a>
 ## Security
 
-Docker Socket access effectively grants elevated container-management privileges. The UI does not accept arbitrary container names, images, or commands, but the controller must still be used only on a trusted LAN or VPN. Successful login creates a temporary 12-hour session. Plain HTTP does not encrypt credentials or sessions, so never expose port `8088` directly to the internet. For remote administration, use Tailscale or a trusted HTTPS reverse proxy.
+Docker Socket access effectively grants elevated container-management privileges. The UI does not accept arbitrary container names, images, or commands. Use the controller only on a trusted LAN. Successful login creates a temporary 12-hour session. Plain HTTP does not encrypt credentials or sessions.
 
-Player IP addresses are sensitive. Open the details page only on a trusted LAN or VPN. If Minecraft uses `ONLINE_MODE=FALSE` for offline launchers, player names can be impersonated and the server should not be exposed directly to the internet.
+Player IP addresses are sensitive. Open the details page only on a trusted LAN. If Minecraft uses `ONLINE_MODE=FALSE` for offline launchers, player names can be impersonated.
 
 <a id="disclaimer"></a>
 ## Disclaimer

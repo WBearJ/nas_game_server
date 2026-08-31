@@ -93,7 +93,7 @@ nas_game_server
 
 若舊的 `minecraft-neoforge` 專案仍在運行，先備份並確認世界位於 `minecraft/data`，再停止並刪除舊容器。舊版 `minecraft-backup` 容器也可刪除。只刪除容器，不要刪除資料或 `minecraft/data`、`mods`、`installer`、`backups` 目錄。
 
-Palworld REST 管理密碼 `PALWORLD_ADMIN_PASSWORD` 預設也是 `admin123`，它與網頁管理帳號是兩套獨立設定。遊戲使用 UDP `8211`，Steam 查詢使用 UDP `27015`；允許網際網路玩家加入時，必須同時在路由器和 Synology 防火牆放行。REST 連接埠 `8212` 未發布，不要轉送到網際網路。
+Palworld REST 管理密碼 `PALWORLD_ADMIN_PASSWORD` 預設也是 `admin123`，它與網頁管理帳號是兩套獨立設定。區域網路遊戲連接埠為 UDP `8211`，Steam 查詢為 UDP `27015`。REST 連接埠 `8212` 只在容器內部使用。
 
 啟動、停止和重新啟動會在背景執行。首頁的「日誌」預設顯示所有遊戲，詳情頁則預選目前遊戲；日誌每兩秒更新。首次啟動較慢時，總控會依序顯示目錄檢查、映像下載、容器建立和啟動命令。請依進度等待，不要重複點選啟動。
 
@@ -149,8 +149,8 @@ CONTROL_ACCOUNTS_JSON={"admin":"改成高強度密碼","family":"另一個密碼
 - 「儲存世界」執行 `save-all flush`；「立即備份」在背景建立一致性壓縮檔。
 - Minecraft 詳情頁可上傳或刪除最大 512 MB 的 `.jar` Mod；修改後需重新啟動伺服器。
 - Palworld 支援伺服器資訊、世界狀態、玩家資訊、踢出、封鎖、公告、儲存和備份。
-- Terraria 使用 TShock，遊戲連接埠為 TCP `7777`；管理連接埠 `7878` 只綁定 NAS 本機，請勿轉送。
-- Project Zomboid 使用 Build 42 與 RCON。網際網路連線需放行 UDP `16261`–`16263`；RCON TCP `27016` 只綁定 NAS 本機。
+- Terraria 使用 TShock，遊戲連接埠為 TCP `7777`；管理連接埠 `7878` 只綁定 NAS 本機。
+- Project Zomboid 使用 Build 42 與 RCON。區域網路遊戲連接埠為 UDP `16261`–`16263`；RCON TCP `27016` 只綁定 NAS 本機。
 - 各遊戲記憶體占用見上文「資源占用」。網頁遊戲卡片也會顯示即時 CPU、記憶體和目錄大小。
 
 <a id="register"></a>
@@ -175,9 +175,9 @@ CONTROL_ACCOUNTS_JSON={"admin":"改成高強度密碼","family":"另一個密碼
 <a id="security"></a>
 ## 安全說明
 
-Docker Socket 等同較高的 NAS 容器管理權限。總控雖不接受任意容器名稱、映像或命令，仍應只在可信任區域網路或 VPN 中使用。登入後簽發 12 小時暫時工作階段；HTTP 不會加密密碼和工作階段，請勿直接將 `8088` 暴露到網際網路。遠端管理應使用 Tailscale 或可信任的 HTTPS 反向代理。
+Docker Socket 等同較高的 NAS 容器管理權限。總控雖不接受任意容器名稱、映像或命令，仍應只在可信任區域網路中使用。登入後簽發 12 小時暫時工作階段；HTTP 不會加密密碼和工作階段。
 
-玩家 IP 屬於敏感資訊，詳情頁只應在可信任網路中使用。Minecraft 若設定 `ONLINE_MODE=FALSE`，玩家名稱可能被冒用，不應直接公開到網際網路。
+玩家 IP 屬於敏感資訊，詳情頁只應在可信任區域網路中使用。Minecraft 若設定 `ONLINE_MODE=FALSE`，玩家名稱可能被冒用。
 
 <a id="disclaimer"></a>
 ## 責任說明
