@@ -927,7 +927,10 @@ def clamp_minecraft_version(loader_id, version, fetch=True):
     return allowed[0] if allowed else version
 
 
-NEOFORGE_INSTALLER_FILENAME = re.compile(r"^neoforge-(.+)-installer\.jar$", re.IGNORECASE)
+NEOFORGE_INSTALLER_FILENAME = re.compile(
+    r"^neoforge[-_](.+?)[-_]installer(?:\s*\(\d+\))?\.jar$",
+    re.IGNORECASE
+)
 
 
 def version_parts(version):
@@ -938,7 +941,7 @@ def version_parts(version):
     return tuple(parts)
 
 
-def local_neoforge_installer(mc_version, relative="minecraft/installer"):
+def installer_directory(relative="minecraft/installer"):
     if not HOST_PROJECT_MOUNT.is_dir():
         return None
     try:
@@ -947,7 +950,22 @@ def local_neoforge_installer(mc_version, relative="minecraft/installer"):
         return None
     if not directory.is_dir():
         return None
-    matches = []
+    return directory
+
+
+def installer_file_names(relative="minecraft/installer"):
+    directory = installer_directory(relative)
+    if directory is None:
+        return []
+    return sorted(path.name for path in directory.iterdir() if path.is_file())
+
+
+def local_neoforge_installer(mc_version, relative="minecraft/installer"):
+    directory = installer_directory(relative)
+    if directory is None:
+        return None
+    matching = []
+    available = []
     for path in directory.iterdir():
         if not path.is_file():
             continue
@@ -955,13 +973,15 @@ def local_neoforge_installer(mc_version, relative="minecraft/installer"):
         if not parsed:
             continue
         nf_version = parsed.group(1)
-        if neoforge_minecraft_version(nf_version) != str(mc_version):
-            continue
-        matches.append((version_parts(nf_version), nf_version, path.name))
-    if not matches:
+        item = (version_parts(nf_version), nf_version, path.name)
+        available.append(item)
+        if neoforge_minecraft_version(nf_version) == str(mc_version):
+            matching.append(item)
+    chosen = matching or available
+    if not chosen:
         return None
-    matches.sort()
-    _, nf_version, name = matches[-1]
+    chosen.sort()
+    _, nf_version, name = chosen[-1]
     return nf_version, f"/installer/{name}"
 
 
@@ -991,6 +1011,10 @@ def apply_minecraft_runtime(game, values=None):
         if local:
             environment["NEOFORGE_VERSION"] = local[0]
             environment["NEOFORGE_INSTALLER"] = local[1]
+            mapped = neoforge_minecraft_version(local[0])
+            if mapped:
+                environment["VERSION"] = mapped
+                version = mapped
         else:
             environment["NEOFORGE_VERSION"] = "latest"
     elif loader_id == "forge":
@@ -1893,10 +1917,41 @@ def prepare_host_paths(game):
             raise DockerError(500, f"缺少项目文件 {relative}；请重新上传完整项目后重试")
 
 
+def container_env_map(info):
+    result = {}
+    for item in (info.get("Config") or {}).get("Env") or []:
+        if "=" in str(item):
+            key, value = str(item).split("=", 1)
+            result[key] = value
+    return result
+
+
+def container_needs_recreate(spec, info):
+    current = container_env_map(info)
+    for key, value in (spec.get("environment") or {}).items():
+        if current.get(key) != str(value):
+            return True
+    return False
+
+
 def ensure_game(game):
     update_operation(message="正在检查 NAS 数据目录")
     prepare_host_paths(game)
     apply_minecraft_runtime(game, read_settings_store().get(game.get("id"), {}))
+    spec = primary_spec_from_game(game) or {}
+    environment = spec.get("environment") or {}
+    if environment.get("TYPE") == "NEOFORGE":
+        installer = environment.get("NEOFORGE_INSTALLER")
+        if installer:
+            record_log(f"使用本地 NeoForge 安装器 {installer}", game["id"])
+        else:
+            names = installer_file_names()
+            record_log(
+                "未找到可用的 neoforge-*-installer.jar，容器将访问 maven.neoforged.net。"
+                f" 当前 installer 目录文件：{', '.join(names) if names else '空'}",
+                game["id"],
+                "error"
+            )
     for requirement in game.get("requiredEnvironment", []):
         value = str(os.environ.get(requirement.get("name", ""), "")).strip()
         invalid = {str(item) for item in requirement.get("invalid", [])}
@@ -1913,7 +1968,18 @@ def ensure_game(game):
             record_log(f"容器 {spec['name']} 创建完成", game["id"])
         else:
             assert_managed(game, spec, info)
-            record_log(f"容器 {spec['name']} 已存在，继续使用", game["id"])
+            if container_needs_recreate(spec, info):
+                status = (info.get("State") or {}).get("Status")
+                if status in ("running", "paused", "restarting"):
+                    update_operation(message=f"正在停止 {spec['name']} 以便应用新配置")
+                    DOCKER.stop(spec["name"], spec.get("stopTimeout", 120))
+                update_operation(message=f"正在按新配置重建 {spec['name']}")
+                record_log(f"容器 {spec['name']} 环境已变化，正在重建并保留数据目录", game["id"])
+                DOCKER.remove(spec["name"])
+                DOCKER.create_container(game, spec)
+                record_log(f"容器 {spec['name']} 已按新配置重建", game["id"])
+            else:
+                record_log(f"容器 {spec['name']} 已存在，继续使用", game["id"])
         DOCKER.disable_auto_restart(spec["name"])
 
 

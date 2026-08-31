@@ -525,6 +525,65 @@ class ControllerTests(unittest.TestCase):
             "/installer/neoforge-26.2.0.62-installer.jar"
         )
 
+    def test_local_neoforge_installer_falls_back_to_any_jar(self):
+        game = copy.deepcopy(next(item for item in SERVER.GAMES if item["id"] == "minecraft"))
+        with tempfile.TemporaryDirectory() as directory:
+            installer = Path(directory) / "minecraft" / "installer"
+            installer.mkdir(parents=True)
+            (installer / "neoforge-21.1.200-installer.jar").write_bytes(b"jar")
+            SERVER.HOST_PROJECT_MOUNT = Path(directory)
+            SERVER.apply_minecraft_runtime(game, {"loader": "neoforge", "mcVersion": "26.2"})
+        spec = SERVER.primary_spec_from_game(game)
+        self.assertEqual(spec["environment"]["NEOFORGE_INSTALLER"], "/installer/neoforge-21.1.200-installer.jar")
+        self.assertEqual(spec["environment"]["VERSION"], "1.21.1")
+
+    def test_ensure_game_recreates_when_installer_env_added(self):
+        game = copy.deepcopy(next(item for item in SERVER.GAMES if item["id"] == "minecraft"))
+
+        class RecreateDocker:
+            def __init__(self):
+                self.removed = []
+                self.created = []
+
+            def inspect(self, _name):
+                if self.created:
+                    return None
+                return {
+                    "State": {"Status": "exited"},
+                    "Config": {
+                        "Labels": {
+                            "nas-game-server.managed": "true",
+                            "nas-game-server.game": "minecraft"
+                        },
+                        "Env": ["TYPE=NEOFORGE", "NEOFORGE_VERSION=latest", "VERSION=26.2"]
+                    }
+                }
+
+            def create_container(self, _game, spec):
+                self.created.append(spec["environment"].get("NEOFORGE_INSTALLER"))
+                return {}
+
+            def remove(self, name):
+                self.removed.append(name)
+
+            def disable_auto_restart(self, _name):
+                return None
+
+            def stop(self, _name, _timeout=120):
+                return None
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            installer = root / "minecraft" / "installer"
+            installer.mkdir(parents=True)
+            (installer / "neoforge-26.2.0.62-installer.jar").write_bytes(b"jar")
+            SERVER.HOST_PROJECT_MOUNT = root
+            docker = RecreateDocker()
+            SERVER.DOCKER = docker
+            SERVER.ensure_game(game)
+        self.assertEqual(docker.removed, ["minecraft-neoforge"])
+        self.assertEqual(docker.created, ["/installer/neoforge-26.2.0.62-installer.jar"])
+
     def test_minecraft_settings_reject_version_below_loader_minimum(self):
         game = next(item for item in SERVER.GAMES if item["id"] == "minecraft")
         SERVER.MINECRAFT_CATALOG_CACHE["payload"] = {

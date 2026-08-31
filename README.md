@@ -167,17 +167,16 @@ https://bmclapi2.bangbang93.com/maven/net/neoforged/neoforge/26.2.0.62/neoforge-
 
 目录不存在时先建 `minecraft/installer`。只放安装器 jar，不要改后缀，也不要放进 `mods/` 或 `data/`。
 
-### 4. 重新创建游戏容器
+### 4. 重启总控并启动
 
-总控只在**创建**容器时读取安装器。如果之前已经点过启动（即使失败了）：
+把安装器放到目录后：
 
-1. 在网页停止 Minecraft。
-2. 打开群晖 **Container Manager**，只删除名为 `minecraft-neoforge` 的容器，**不要**勾选删除数据，也不要删除 `minecraft/data`。
-3. 回到网页再点「启动」。
+1. 确认 NAS 上的 `controller/server.py` 已更新，然后重启总控：`docker restart nas-game-controller`
+2. 在网页直接点「启动」。若已有失败的 `minecraft-neoforge` 容器，总控会自动重建它（保留 `minecraft/data`），不必再手动删除。
 
-也可以在详情页保存一次「常用配置」，总控会重建容器并保留存档。容器尚未创建时，放好文件后直接启动即可。
+总控日志应出现 `使用本地 NeoForge 安装器 /installer/neoforge-...-installer.jar`。游戏容器日志不应再出现 `fetching metadata for net.neoforged:neoforge`。
 
-日志里如果出现 `NEOFORGE_INSTALLER=/installer/neoforge-...-installer.jar` 或不再出现 `fetching metadata for net.neoforged:neoforge`，说明已经走本地安装器。
+如果日志写的是「未找到可用的 neoforge-*-installer.jar」，检查文件名是否为 `neoforge-<版本>-installer.jar`，以及是否放在 `minecraft/installer/` 而不是 `mods/`。
 
 ### 5. 若安装器运行后仍报网络错误
 
