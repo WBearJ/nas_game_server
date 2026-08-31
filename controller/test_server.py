@@ -88,6 +88,31 @@ class ControllerTests(unittest.TestCase):
             SERVER.authenticate_account("admin", "wrong", "127.0.0.3")
         self.assertEqual(context.exception.status, 401)
 
+    def test_game_library_is_empty_before_games_are_added(self):
+        with tempfile.TemporaryDirectory() as directory:
+            SERVER.HOST_PROJECT_MOUNT = Path(directory)
+            self.assertEqual(SERVER.read_added_game_ids(), [])
+            self.assertEqual(SERVER.added_games(), [])
+
+    def test_game_library_persists_added_games_in_catalog_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            SERVER.HOST_PROJECT_MOUNT = Path(directory)
+            selected = [SERVER.GAMES[-1]["id"], SERVER.GAMES[0]["id"], SERVER.GAMES[-1]["id"]]
+            SERVER.persist_added_game_ids(selected)
+            self.assertEqual(SERVER.read_added_game_ids(), selected[:2])
+            self.assertEqual(
+                [game["id"] for game in SERVER.added_games()],
+                [game["id"] for game in SERVER.GAMES if game["id"] in set(selected)]
+            )
+
+    def test_game_library_ignores_unknown_catalog_entries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            SERVER.HOST_PROJECT_MOUNT = Path(directory)
+            store = SERVER.game_library_store_path()
+            store.parent.mkdir(parents=True)
+            store.write_text('{"games":["unknown-game"]}\n', encoding="utf-8")
+            self.assertEqual(SERVER.read_added_game_ids(), [])
+
     def test_docker_stream_decode(self):
         payload = (
             b"\x01\x00\x00\x00\x00\x00\x00\x05hello"

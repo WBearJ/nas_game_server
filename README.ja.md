@@ -18,10 +18,49 @@ nas_game_server/
 └── zomboid/                  # セーブ、Build 42、Workshop データ、バックアップ
 ```
 
+## 推奨構成
+
+家庭 LAN 向けに、コントローラー常駐・ゲームは必要なときだけ起動する前提で調整しています。DSM、Docker、ファイルキャッシュ用に約 **4–6 GB** のメモリを残し、物理 RAM をすべてゲームへ割り当てないでください。本リポジトリのゲームサーバーはほぼ x86_64 専用で、ARM の Synology では一般に動作しません。
+
+### NAS ハードウェア
+
+| 項目 | 最低 | 推奨 |
+| --- | --- | --- |
+| CPU | x86_64 4 コア | 6 コア以上、単一スレッド性能が高いもの（Intel / AMD） |
+| メモリ | 16 GB | **20 GB 以上**（既定値は 20 GB NAS 向けで、Minecraft に `14G` を割り当て） |
+| ストレージ | HDD は Terraria のような軽量サーバー向け | **SSD / NVMe**。Palworld と Project Zomboid はセーブ書き込みが多く、HDD では遅延や破損の原因になる |
+| 空き容量 | 40 GB | **80 GB 以上**（Docker イメージ + Steam サーバー本体 + ワールド + 各ゲーム 1 件のバックアップ） |
+| ネットワーク | ギガビット LAN | ギガビット LAN。インターネット公開時は安定した上り帯域も必要 |
+
+32 GB 以上あれば、Minecraft を `12G` に下げて Terraria と常時併用したり、Project Zomboid を 8 GB に上げたりできます。メモリに余裕があっても、大型サーバーを 2 つ同時に動かさないでください（Minecraft、Palworld、Project Zomboid は重ねない）。
+
+### ゲームごとのリソース
+
+家庭 2–10 人、本リポジトリの既定プレイヤー数を想定した目安です。ディスクはワールド、Mod、バックアップとともに増えます。各ゲームのバックアップは最新 1 件のみ保持します。
+
+| | Web コントローラー | Minecraft Java（NeoForge） | Palworld | Terraria（TShock） | Project Zomboid（Build 42） |
+| --- | --- | --- | --- | --- | --- |
+| 実行時メモリ | 約 100–300 MB | 約 12–16 GB | 約 8–16 GB | 約 0.5–2 GB | 約 5–9 GB |
+| リポジトリ既定 | 常駐 | `MEMORY=14G` | コンテナ上限なし。人数と建築量で増加 | 8 人・中型ワールドで約 1 GB | `PZ_MAX_RAM=6144m`（Java ヒープ 6 GB、UI で 4 / 6 / 8 GB） |
+| 初回ディスク | イメージ約 0.2–0.5 GB | イメージ 1–2 GB、サーバー + Mod 約 2–5 GB | Steam サーバー約 12–20 GB | イメージ約 0.5–1 GB | Steam サーバー約 10–15 GB |
+| 運用ディスク | ほぼ無視可 | ワールドはよく 2–10 GB+ | ワールド約 1–5 GB | ワールド 50–400 MB | セーブ約 2–10 GB、Workshop Mod は別途 |
+| CPU | ごく低い | 2–4 コア。Mod が多いほど単一スレッド負荷が高い | 4 コア以上 | 1–2 コア | 4 コア、単一スレッド寄り |
+| 既定人数 | — | 10 | 16 | 8 | 8 |
+| 20 GB NAS | 常時可 | 大型サーバーは単独。Terraria 併用時は Minecraft を `12G` に下げる | 大型サーバーは単独。Terraria は併用可 | 任意の大型サーバー 1 つと併用可 | 大型サーバーは単独。Terraria は併用可 |
+
+**20 GB メモリの NAS での同時起動：**
+
+- 可：コントローラー + 大型サーバー 1 つ + Terraria
+- 不可：Minecraft + Palworld、Minecraft + Project Zomboid、Palworld + Project Zomboid、大型サーバー 3 つ同時
+
+メモリ不足になると、DSM がスワップを使い始めるかコンテナを強制終了します。カクつき、セーブ破損、再起動ループとして現れます。別の大型ゲームを始める前に、Web 画面で現在の大型サーバーを停止してください。
+
+他のメモリ消費の大きいパッケージと併用する場合は、`.env` の Minecraft `MEMORY` を `14G` から `12G` へ下げます。Palworld の公式推奨は 16 GB で、8 GB でも起動しますがメモリ不足クラッシュが起きやすいです。Project Zomboid は初回起動時にサーバー本体をダウンロードし、Java ヒープは UI で 4 / 6 / 8 GB に変更できます。
+
 ## Synology への導入
 
 1. ディレクトリ全体を `/volume1/docker/nas_game_server` にアップロードします。別のパスを使う場合は `.env` の `HOST_PROJECT_PATH` も変更してください。
-2. `.env` を開き、管理アカウント、`EULA=TRUE`、メモリ、ポート、Minecraft の設定を確認します。初期アカウントは `admin`、パスワードは `admin123` です。
+2. `.env` を開き、管理アカウント、`EULA=TRUE`、メモリ、ポート、Minecraft の設定を確認します。初期アカウントは `admin`、パスワードは `admin123` です。メモリとディスクは上記「推奨構成」を参照してください。
 3. 古い `minecraft-neoforge` プロジェクトが動作中の場合はバックアップを作成し、ワールドが `minecraft/data` にあることを確認してから古いコンテナを停止・削除します。旧 `minecraft-backup` コンテナも削除できます。コンテナだけを削除し、データや `minecraft/data`、`mods`、`installer`、`backups` は削除しないでください。
 4. **Container Manager → プロジェクト → 作成**を開き、プロジェクト名に `nas-game-server` を入力し、ルートディレクトリの `compose.yaml` を使用します。
 5. プロジェクトをビルドして起動します。実行されるのは `nas-game-controller` だけです。
@@ -83,7 +122,7 @@ CONTROL_ACCOUNTS_JSON={"admin":"strong-password","family":"another-password","op
 - Palworld はサーバー・ワールド情報、プレイヤー情報、キック、BAN、通知、保存、バックアップに対応します。
 - Terraria は TShock を使用します。ゲームポートは TCP `7777`、管理ポート `7878` は NAS ローカル専用で、外部へ転送しないでください。
 - Project Zomboid は Build 42 と RCON を使用します。外部接続には UDP `16261`–`16263` が必要で、RCON TCP `27016` は NAS ローカル専用です。
-- Palworld と Project Zomboid は多くのメモリを使用します。20 GB の NAS では大型サーバーを必要なときだけ個別に実行し、Minecraft、Palworld、Project Zomboid の同時実行は避けてください。
+- メモリ、ディスク、同時起動の制限は上記「推奨構成」を参照してください。ゲームカードにも CPU、メモリ、ディレクトリサイズがリアルタイム表示されます。
 
 ## ゲームの追加登録
 

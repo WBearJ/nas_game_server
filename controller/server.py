@@ -530,6 +530,49 @@ def settings_store_path():
     return HOST_PROJECT_MOUNT / "config" / "game-settings.json"
 
 
+def game_library_store_path():
+    return HOST_PROJECT_MOUNT / "config" / "added-games.json"
+
+
+def read_added_game_ids():
+    path = game_library_store_path()
+    if not path.is_file():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"无法读取已添加游戏：{exc}") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("games"), list):
+        return []
+    available = {game["id"] for game in GAMES}
+    return list(dict.fromkeys(
+        game_id for game_id in payload["games"]
+        if isinstance(game_id, str) and game_id in available
+    ))
+
+
+def persist_added_game_ids(game_ids):
+    path = game_library_store_path()
+    available = {game["id"] for game in GAMES}
+    normalized = list(dict.fromkeys(game_id for game_id in game_ids if game_id in available))
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f".{path.name}.{threading.get_ident()}.tmp")
+        temporary.write_text(
+            json.dumps({"games": normalized}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8"
+        )
+        os.replace(temporary, path)
+    except OSError as exc:
+        raise DockerError(500, f"无法保存已添加游戏：{exc}") from exc
+    return normalized
+
+
+def added_games():
+    added = set(read_added_game_ids())
+    return [game for game in GAMES if game["id"] in added]
+
+
 def read_settings_store():
     path = settings_store_path()
     if not path.is_file():
@@ -2139,10 +2182,29 @@ class Handler(BaseHTTPRequestHandler):
             if not self.require_auth():
                 return
             try:
-                games = [public_game(game) for game in GAMES]
+                games = [public_game(game) for game in added_games()]
                 self.json_response(200, {"games": games, "operation": operation_snapshot()})
-            except DockerError as exc:
+            except (DockerError, RuntimeError) as exc:
                 self.json_response(503, {"error": str(exc)})
+            return
+        if path == "/api/game-library":
+            if not self.require_auth():
+                return
+            try:
+                added = set(read_added_game_ids())
+                games = [{
+                    "id": game["id"],
+                    "name": game["name"],
+                    "description": game.get("description", ""),
+                    "icon": game.get("icon", ""),
+                    "version": game.get("version", ""),
+                    "loader": game.get("loader", ""),
+                    "endpoint": game.get("endpoint", ""),
+                    "added": game["id"] in added
+                } for game in GAMES]
+                self.json_response(200, {"games": games})
+            except RuntimeError as exc:
+                self.json_response(500, {"error": str(exc)})
             return
         detail_match = re.fullmatch(r"/api/games/([a-z0-9_-]+)/detail", path)
         if detail_match:
@@ -2204,6 +2266,23 @@ class Handler(BaseHTTPRequestHandler):
             if username:
                 record_log(f"管理账号 {username} 已退出", "auth")
             self.json_response(200, {"authenticated": False})
+            return
+        library_match = re.fullmatch(r"/api/game-library/([a-z0-9_-]+)", path)
+        if library_match:
+            game = GAME_INDEX.get(library_match.group(1))
+            if game is None:
+                self.json_response(404, {"error": "游戏未注册"})
+                return
+            try:
+                with STATE_LOCK:
+                    game_ids = read_added_game_ids()
+                    if game["id"] not in game_ids:
+                        game_ids.append(game["id"])
+                    persist_added_game_ids(game_ids)
+                record_log(f"已将 {game['name']} 添加到首页", game["id"])
+                self.json_response(201, {"message": f"已添加 {game['name']}"})
+            except (DockerError, RuntimeError) as exc:
+                self.json_response(getattr(exc, "status", 500), {"error": str(exc)})
             return
         settings_match = re.fullmatch(r"/api/games/([a-z0-9_-]+)/settings", path)
         if settings_match:
@@ -2398,6 +2477,21 @@ class Handler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         path = urlparse(self.path).path
         if not self.require_auth():
+            return
+        library_match = re.fullmatch(r"/api/game-library/([a-z0-9_-]+)", path)
+        if library_match:
+            game = GAME_INDEX.get(library_match.group(1))
+            if game is None:
+                self.json_response(404, {"error": "游戏未注册"})
+                return
+            try:
+                with STATE_LOCK:
+                    game_ids = [game_id for game_id in read_added_game_ids() if game_id != game["id"]]
+                    persist_added_game_ids(game_ids)
+                record_log(f"已将 {game['name']} 从首页移除", game["id"])
+                self.json_response(200, {"message": f"已移除 {game['name']}，服务器数据未删除"})
+            except (DockerError, RuntimeError) as exc:
+                self.json_response(getattr(exc, "status", 500), {"error": str(exc)})
             return
         mod_match = re.fullmatch(r"/api/games/([a-z0-9_-]+)/mods/(.+)", path)
         if not mod_match:

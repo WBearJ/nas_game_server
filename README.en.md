@@ -33,10 +33,49 @@ nas_game_server/
     └── backups/              # Latest Project Zomboid backup
 ```
 
+## Recommended hardware and resource use
+
+This project is tuned for a home LAN: the controller stays running, and game servers start on demand. Reserve about **4–6 GB** of RAM for DSM, Docker, and file cache. Do not assign all physical memory to games. Dedicated servers in this repo are x86_64; ARM Synology models generally will not run them.
+
+### NAS hardware
+
+| Item | Minimum | Recommended |
+| --- | --- | --- |
+| CPU | x86_64 quad-core | 6+ cores with strong single-thread performance (Intel / AMD) |
+| RAM | 16 GB | **20 GB or more** (defaults assume a 20 GB NAS and `MEMORY=14G` for Minecraft) |
+| Storage | HDD is acceptable only for light servers such as Terraria | **SSD / NVMe**. Palworld and Project Zomboid write saves frequently; HDDs can stutter or corrupt worlds |
+| Free space | 40 GB | **80 GB or more** (Docker images + Steam server files + worlds + one backup each) |
+| Network | Gigabit LAN | Gigabit LAN; add stable upload if you host over the internet |
+
+With 32 GB or more, you can keep Minecraft at `12G` alongside Terraria, or raise Project Zomboid to 8 GB. Even then, do not run two heavy servers at once (Minecraft, Palworld, and Project Zomboid should not overlap).
+
+### Per-game resources
+
+Figures below assume a home group of 2–10 players and this repo’s default player caps. Disk use grows with worlds, mods, and backups; each game keeps only the latest archive.
+
+| | Web controller | Minecraft Java (NeoForge) | Palworld | Terraria (TShock) | Project Zomboid (Build 42) |
+| --- | --- | --- | --- | --- | --- |
+| RAM in use | About 100–300 MB | About 12–16 GB | About 8–16 GB | About 0.5–2 GB | About 5–9 GB |
+| Repo default | Always on | `MEMORY=14G` | No container memory cap; grows with players and bases | About 1 GB for 8 players on a medium world | `PZ_MAX_RAM=6144m` (6 GB Java heap; 4 / 6 / 8 GB in the UI) |
+| First-start disk | Image about 0.2–0.5 GB | Image 1–2 GB; server + mods about 2–5 GB | Steam server about 12–20 GB | Image about 0.5–1 GB | Steam server about 10–15 GB |
+| Ongoing disk | Negligible | Worlds often 2–10 GB+ | World about 1–5 GB | World 50–400 MB | Saves about 2–10 GB, plus Workshop mods |
+| CPU | Very low | 2–4 cores; mods stress single-thread performance | 4+ cores | 1–2 cores | 4 cores, single-thread heavy |
+| Default players | — | 10 | 16 | 8 | 8 |
+| 20 GB NAS | Always fine | One heavy server; Terraria can share if you lower Minecraft to `12G` | One heavy server; Terraria can share | Can run with any one heavy server | One heavy server; Terraria can share |
+
+**On a 20 GB NAS, run at the same time:**
+
+- Yes: controller + any one heavy server + Terraria
+- No: Minecraft + Palworld; Minecraft + Project Zomboid; Palworld + Project Zomboid; all three heavy servers
+
+If RAM runs out, DSM starts swapping or kills containers. That shows up as stuttering, corrupt saves, or restart loops. Stop the current heavy server in the web UI before starting another.
+
+If other memory-heavy packages are running, lower Minecraft `MEMORY` from `14G` to `12G` in `.env`. Palworld officially recommends 16 GB; 8 GB will boot but is prone to out-of-memory crashes. Project Zomboid downloads server files on first start; Java heap can be set to 4 / 6 / 8 GB in the UI.
+
 ## Deploy on Synology
 
 1. Upload the entire directory to `/volume1/docker/nas_game_server`. If you use another path, update `HOST_PROJECT_PATH` in `.env`.
-2. Open `.env` and verify the admin accounts, `EULA=TRUE`, memory, ports, and Minecraft options. The defaults are username `admin` and password `admin123`.
+2. Open `.env` and verify the admin accounts, `EULA=TRUE`, memory, ports, and Minecraft options. The defaults are username `admin` and password `admin123`. See **Recommended hardware and resource use** for RAM and disk.
 3. If an older `minecraft-neoforge` project is running, back it up, confirm that its world is in `minecraft/data`, then stop and remove the old `minecraft-neoforge` container. You may also remove the obsolete `minecraft-backup` container. Remove containers only: do not delete their data or the `minecraft/data`, `mods`, `installer`, or `backups` directories.
 4. Open **Container Manager → Project → Create**, use `nas-game-server` as the project name, select the project root, and use its `compose.yaml`.
 5. Build and start the project. Only `nas-game-controller` should appear and run.
@@ -98,7 +137,7 @@ Usernames may contain letters, numbers, dots, hyphens, and underscores and are l
 - Palworld details show server version, world GUID, FPS, frame time, world days, settings, and player account/IP/level/ping/building/location data. Players may be kicked or banned.
 - Terraria uses a stable TShock image and supports players, IPs, account groups, kick, ban, announcements, saves, and backups. Game port TCP `7777` may be published; management port `7878` is bound only to the NAS and must not be forwarded.
 - Project Zomboid uses an automatically updated Build 42 image and supports RCON players, kick, ban, announcements, saves, backups, and Workshop/Mod IDs. Internet play needs UDP `16261`–`16263`; RCON TCP `27016` is NAS-local only.
-- Palworld and Project Zomboid require substantial memory. On a 20 GB NAS, run large servers on demand and avoid running Minecraft, Palworld, and Project Zomboid simultaneously.
+- See **Recommended hardware and resource use** for RAM, disk, and which servers may run together. Game cards also show live CPU, memory, and directory size.
 
 ## Register another game
 

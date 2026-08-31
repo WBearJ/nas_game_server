@@ -19,7 +19,7 @@ minecraft-synology/
 
 打开 `.env`，至少检查以下项目：
 
-1. `MEMORY=14G`：按 NAS 总内存 20GB 设置，给 DSM、Container Manager 和文件缓存保留约 6GB。若 NAS 同时运行其他高内存服务，可降到 `12G`。
+1. `MEMORY=14G`：按 NAS 总内存 20 GB 设置，给 DSM、Container Manager 和文件缓存保留约 6 GB。模组服运行时大约占用 12–16 GB；镜像约 1–2 GB，服务端和模组约 2–5 GB，世界常见 2–10 GB 以上。若同时运行其他高内存服务，或还要开 Terraria，可降到 `12G`。不要与幻兽帕鲁或 Project Zomboid 同时启动。
 2. `OPS`：可填写管理员的正版 Java 版用户名，多个名字用英文逗号分隔。
 3. 如果服务器要开放到互联网，设置 `ENABLE_WHITELIST=TRUE`，并在 `WHITELIST` 填写允许加入的用户名。
 4. `EULA=TRUE` 表示接受 [Minecraft EULA](https://aka.ms/MinecraftEULA)；如不同意，请不要启动。
