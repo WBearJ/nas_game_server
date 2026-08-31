@@ -559,6 +559,17 @@ def expand(value):
     return value
 
 
+def safe_host_path(relative):
+    relative_path = Path(relative)
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        raise DockerError(400, f"无效的项目内路径：{relative}")
+    root = HOST_PROJECT_MOUNT.resolve()
+    target = (root / relative_path).resolve()
+    if root not in target.parents:
+        raise DockerError(400, f"项目内路径越界：{relative}")
+    return target
+
+
 def load_games():
     with CONFIG_PATH.open("r", encoding="utf-8") as handle:
         config = expand(json.load(handle))
@@ -1063,17 +1074,6 @@ def public_game(game):
         "containers": containers,
         "metrics": game_metrics(game, containers)
     }
-
-
-def safe_host_path(relative):
-    relative_path = Path(relative)
-    if relative_path.is_absolute() or ".." in relative_path.parts:
-        raise DockerError(400, f"无效的项目内路径：{relative}")
-    root = HOST_PROJECT_MOUNT.resolve()
-    target = (root / relative_path).resolve()
-    if root not in target.parents:
-        raise DockerError(400, f"项目内路径越界：{relative}")
-    return target
 
 
 def directory_size(path):

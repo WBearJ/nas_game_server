@@ -502,6 +502,13 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(spec["image"], "itzg/minecraft-server:java8")
         self.assertFalse(game["supportsMods"])
 
+    def test_safe_host_path_is_defined_before_games_load(self):
+        source = Path(SERVER.__file__).read_text(encoding="utf-8")
+        defined_at = source.find("def safe_host_path(")
+        loaded_at = source.find("GAMES = load_games()")
+        self.assertGreater(defined_at, -1)
+        self.assertGreater(loaded_at, defined_at)
+
     def test_local_neoforge_installer_is_used_for_matching_version(self):
         game = copy.deepcopy(next(item for item in SERVER.GAMES if item["id"] == "minecraft"))
         with tempfile.TemporaryDirectory() as directory:
