@@ -2,72 +2,98 @@
 
 [简体中文](README.md) | [English](README.en.md) | **繁體中文** | [日本語](README.ja.md)
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 本專案採用「總控常駐、遊戲按需啟動」的方式運行。NAS 或專案首次啟動時只有 `nas-game-controller` 自動啟動；Minecraft 和其他已註冊的遊戲服務不會自動啟動。遊戲容器統一使用 `restart: no`，因此 NAS 重新啟動後仍會保持停止，直到你再次於網頁啟動。自動備份由總控內部排程負責，不需要額外的備份容器。
 
-## 目前結構
+**文件目錄**
 
-```text
-nas_game_server/
-├── compose.yaml              # 只啟動網頁總控
-├── .env                      # 管理帳號、NAS 路徑和遊戲參數
-├── config/game-settings.json # 網頁儲存的常用設定
-├── controller/               # Docker 控制 API、註冊表和網頁
-├── minecraft/                # 世界、Mod、安裝程式和備份
-├── palworld/                 # 伺服器、設定、世界和備份
-├── terraria/                 # 世界、TShock 設定、外掛和備份
-└── zomboid/                  # 存檔、Build 42 檔案、Workshop 資料和備份
-```
+<pre>
+nas_game_server
+├── <a href="#guide">使用教學</a>
+├── <a href="#resources">資源占用</a>
+├── <a href="#layout">目錄結構</a>
+│   ├── <a href="LICENSE">LICENSE</a>
+│   ├── <a href="compose.yaml">compose.yaml</a>
+│   ├── <a href=".env.example">.env.example</a>
+│   ├── <a href="controller/">controller/</a>
+│   │   ├── <a href="controller/Dockerfile">Dockerfile</a>
+│   │   ├── <a href="controller/server.py">server.py</a>
+│   │   ├── <a href="controller/games.json">games.json</a>
+│   │   └── <a href="controller/static/">static/</a>
+│   ├── <a href="minecraft/">minecraft/</a> · <a href="minecraft/README.md">說明</a>
+│   ├── <a href="palworld/">palworld/</a> · <a href="palworld/README.md">說明</a>
+│   ├── <a href="terraria/">terraria/</a> · <a href="terraria/README.md">說明</a>
+│   └── <a href="zomboid/">zomboid/</a> · <a href="zomboid/README.md">說明</a>
+├── <a href="#deploy">部署說明</a>
+├── <a href="#accounts">管理帳號</a>
+├── <a href="#runtime">運行邏輯</a>
+├── <a href="#details">詳情與玩家管理</a>
+├── <a href="#register">註冊其他遊戲</a>
+├── <a href="#security">安全說明</a>
+├── <a href="#disclaimer">責任說明</a>
+└── <a href="#license">開源授權</a>
+</pre>
 
-## 建議配置
+<a id="guide"></a>
+## 使用教學
 
-本專案依家庭區域網路、「總控常駐、遊戲按需啟動」調校。Synology DSM、Docker 和檔案快取建議預留約 **4–6 GB** 記憶體，不要把全部 RAM 分給遊戲。遊戲伺服器基本上都是 x86_64，ARM 群暉通常無法運行。
+1. 把整個專案複製到 NAS 的一個資料夾，例如 `/volume1/docker/nas_game_server`。
+2. 把 [`.env.example`](.env.example) 複製為 `.env`。路徑如果不是 `/volume1/docker/nas_game_server`，把其中的 `HOST_PROJECT_PATH` 改成實際路徑。
+3. 開啟 Synology **Container Manager → 專案**，點 **新增**，路徑選剛複製的專案資料夾，再點 **加入**。建置並啟動後，只會運行總控 `nas-game-controller`。
+4. 瀏覽器開啟 `http://NAS的區域網路IP:8088` 進入管理頁。預設帳號 `admin`，預設密碼 `admin123`。
+5. 在管理頁點選某個遊戲的「啟動」。第一次會建立對應容器，之後可隨時停止或再啟動。
 
-### NAS 硬體
+<a id="resources"></a>
+## 資源占用
 
-| 項目 | 最低 | 建議 |
+家庭區域網路實測大約如下。`.env` 裡的 `MEMORY=14G`、`PZ_MAX_RAM=6G` 是上限，不是平時實際占用。
+
+| 遊戲 | 實際記憶體 | 說明 |
 | --- | --- | --- |
-| CPU | x86_64 四核 | 六核以上，單核效能較好（Intel / AMD） |
-| 記憶體 | 16 GB | **20 GB 以上**（倉庫預設依 20 GB NAS 將 Minecraft 設為 `14G`） |
-| 儲存 | HDD 僅適合 Terraria 這類輕量伺服器 | **SSD / NVMe**。Palworld 與 Project Zomboid 寫入存檔很頻繁，機械硬碟容易卡頓甚至損壞存檔 |
-| 可用空間 | 40 GB | **80 GB 以上**（Docker 映像 + Steam 伺服器檔案 + 世界 + 一份備份） |
-| 網路 | 千兆區域網路 | 千兆區域網路；網際網路聯機再保證穩定上傳 |
+| Minecraft Java（NeoForge） | 約 2–4 GB | 隨模組和線上人數上升 |
+| Palworld | 約 2 GB | 玩家和建築增多後會再漲 |
+| Terraria（TShock） | 約 400 MB | 最輕 |
+| Project Zomboid | 預設 Java 堆上限 6 GB | 首次啟動還會下載伺服器 |
 
-32 GB 以上時，可把 Minecraft 記憶體降到 `12G` 後與 Terraria 長期同開，或把 Project Zomboid 調到 8 GB。即便記憶體充裕，也不要同時運行兩個大型伺服器（Minecraft、Palworld、Project Zomboid 不要疊開）。
+20 GB 記憶體的 NAS 可以同時開 Minecraft、Palworld 和 Terraria。再加上 Project Zomboid 時注意總占用，避免 DSM 開始使用交換空間。
 
-### 各遊戲資源占用
+<a id="layout"></a>
+## 目錄結構
 
-下表為家庭 2–10 人、使用本倉庫預設人數時的經驗值。磁碟會隨世界、模組和備份增長；每個遊戲只保留最新一份備份。
+點選檔名即可開啟對應內容。`data/`、`backups/` 等執行時目錄會在首次啟動遊戲時自動建立，倉庫預設不包含。
 
-| | 網頁總控 | Minecraft Java（NeoForge） | Palworld | Terraria（TShock） | Project Zomboid（Build 42） |
-| --- | --- | --- | --- | --- | --- |
-| 運行記憶體 | 約 100–300 MB | 約 12–16 GB | 約 8–16 GB | 約 0.5–2 GB | 約 5–9 GB |
-| 本倉庫預設 | 常駐 | `MEMORY=14G` | 不限制容器上限，隨玩家和建築上漲 | 8 人、中型世界約 1 GB | `PZ_MAX_RAM=6144m`（Java 堆 6 GB，可選 4 / 6 / 8 GB） |
-| 首次磁碟 | 映像約 0.2–0.5 GB | 映像 1–2 GB；伺服器 + 模組約 2–5 GB | Steam 伺服器約 12–20 GB | 映像約 0.5–1 GB | Steam 伺服器約 10–15 GB |
-| 日常磁碟 | 可忽略 | 世界常見 2–10 GB+ | 世界約 1–5 GB | 世界 50–400 MB | 存檔約 2–10 GB，Workshop 模組另計 |
-| CPU | 很低 | 2–4 核，模組越多越吃單核 | 4 核以上 | 1–2 核 | 4 核，偏單核 |
-| 預設人數 | — | 10 | 16 | 8 | 8 |
-| 20 GB NAS | 始終可開 | 獨占大型伺服器；可順便開 Terraria（建議把記憶體降到 `12G`） | 獨占大型伺服器；可順便開 Terraria | 可與任意一個大型伺服器同開 | 獨占大型伺服器；可順便開 Terraria |
+- [`LICENSE`](LICENSE) — MIT 開源授權
+- [`compose.yaml`](compose.yaml) — 只啟動網頁總控
+- [`.env.example`](.env.example) — 管理帳號、NAS 路徑和遊戲參數範本，複製為 `.env` 後填寫
+- `config/game-settings.json` — 網頁儲存的常用設定（執行後產生）
+- [`controller/`](controller/)
+  - [`Dockerfile`](controller/Dockerfile)
+  - [`server.py`](controller/server.py) — Docker 控制 API 與靜態檔案服務
+  - [`games.json`](controller/games.json) — 遊戲、資料路徑和容器註冊表
+  - [`static/`](controller/static/) — 網頁控制面板與本機遊戲圖示
+- [`minecraft/`](minecraft/) — [說明](minecraft/README.md)
+  - `data/` — 世界和伺服器資料
+  - [`mods/`](minecraft/mods/) — NeoForge 模組
+  - [`installer/`](minecraft/installer/) — 離線 NeoForge 安裝程式
+  - `backups/` — 自動與手動備份，只保留 latest
+- [`palworld/`](palworld/) — [說明](palworld/README.md)
+  - `data/` — Steam 伺服器、設定與世界存檔
+  - `backups/` — Palworld 最新備份
+- [`terraria/`](terraria/) — [說明](terraria/README.md)
+  - `data/` — 世界、TShock 設定與外掛
+  - `backups/` — Terraria 最新備份
+- [`zomboid/`](zomboid/) — [說明](zomboid/README.md)
+  - `data/` — 存檔、設定和 Workshop 資料
+  - `server-files/` — Build 42 伺服器檔案
+  - `backups/` — Project Zomboid 最新備份
 
-**20 GB 記憶體 NAS 同時運行建議：**
+<a id="deploy"></a>
+## 部署說明
 
-- 可以：總控 + 任意一個大型伺服器 + Terraria
-- 不要：Minecraft + Palworld；Minecraft + Project Zomboid；Palworld + Project Zomboid；三個大型伺服器一起開
+若舊的 `minecraft-neoforge` 專案仍在運行，先備份並確認世界位於 `minecraft/data`，再停止並刪除舊容器。舊版 `minecraft-backup` 容器也可刪除。只刪除容器，不要刪除資料或 `minecraft/data`、`mods`、`installer`、`backups` 目錄。
 
-記憶體不夠時，DSM 會開始使用交換空間或直接殺掉容器，表現為卡頓、存檔損壞或容器反覆重啟。換遊戲前請先在網頁停止目前的大型伺服器。
-
-Minecraft 若同時跑其他高記憶體套件，把 `.env` 的 `MEMORY` 從 `14G` 降到 `12G`。Palworld 官方建議 16 GB，8 GB 能啟動但容易記憶體不足。Project Zomboid 首次啟動會下載伺服器檔案，網頁裡可把 Java 記憶體改成 4 / 6 / 8 GB。
-
-## Synology 部署
-
-1. 將整個目錄上傳到 `/volume1/docker/nas_game_server`。若使用其他路徑，請同步修改 `.env` 的 `HOST_PROJECT_PATH`。
-2. 開啟 `.env`，確認管理帳號、`EULA=TRUE`、記憶體、連接埠和 Minecraft 參數。預設帳號為 `admin`，密碼為 `admin123`。記憶體與磁碟占用見上文「建議配置」。
-3. 若舊的 `minecraft-neoforge` 專案仍在運行，先備份並確認世界位於 `minecraft/data`，再停止並刪除舊容器。舊版 `minecraft-backup` 容器也可刪除。只刪除容器，不要刪除資料或 `minecraft/data`、`mods`、`installer`、`backups` 目錄。
-4. 開啟 **Container Manager → 專案 → 新增**，專案名稱填寫 `nas-game-server`，選擇根目錄並使用其中的 `compose.yaml`。
-5. 建置並啟動專案，此時只會運行 `nas-game-controller`。
-6. 在可信任的區域網路或 VPN 中開啟 `http://NAS區域網路IP:8088`，使用 `.env` 中的帳號登入。
-7. 點選任一遊戲的「啟動」。第一次會建立對應容器，之後可直接啟動、停止或重新啟動。
-
-Palworld REST 管理密碼 `PALWORLD_ADMIN_PASSWORD` 預設也是 `admin123`，它與網頁管理帳號是兩套獨立設定。正式使用時請分別改成不同的高強度密碼。遊戲使用 UDP `8211`，Steam 查詢使用 UDP `27015`；允許網際網路玩家加入時，必須同時在路由器和 Synology 防火牆放行。REST 連接埠 `8212` 未發布，不要轉送到網際網路。
+Palworld REST 管理密碼 `PALWORLD_ADMIN_PASSWORD` 預設也是 `admin123`，它與網頁管理帳號是兩套獨立設定。遊戲使用 UDP `8211`，Steam 查詢使用 UDP `27015`；允許網際網路玩家加入時，必須同時在路由器和 Synology 防火牆放行。REST 連接埠 `8212` 未發布，不要轉送到網際網路。
 
 啟動、停止和重新啟動會在背景執行。首頁的「日誌」預設顯示所有遊戲，詳情頁則預選目前遊戲；日誌每兩秒更新。首次啟動較慢時，總控會依序顯示目錄檢查、映像下載、容器建立和啟動命令。請依進度等待，不要重複點選啟動。
 
@@ -82,6 +108,7 @@ docker restart nas-game-controller
 
 網頁檔案更新後請強制重新整理瀏覽器，避免使用舊快取。
 
+<a id="accounts"></a>
 ## 管理帳號
 
 在根目錄 `.env` 中設定：
@@ -97,10 +124,11 @@ CONTROL_SESSION_TTL_SECONDS=43200
 CONTROL_ACCOUNTS_JSON={"admin":"改成高強度密碼","family":"另一個密碼","operator":"第三個密碼"}
 ```
 
-帳號只能包含英文字母、數字、點、連字號和底線，最長 32 個字元。密碼中的引號和反斜線需依 JSON 規則跳脫。修改後執行 `docker compose up -d --force-recreate controller`；現有工作階段會立即失效。預設密碼只適合可信任區域網路中的首次設定，請儘快更換。
+帳號只能包含英文字母、數字、點、連字號和底線，最長 32 個字元。密碼中的引號和反斜線需依 JSON 規則跳脫。修改後執行 `docker compose up -d --force-recreate controller`；現有工作階段會立即失效。
 
 頁面顯示「需遷移」代表仍有同名舊容器。保留資料並刪除舊容器後重新整理即可。若網頁連接埠衝突，修改 `CONTROL_PORT` 並重新建立總控。不要再將 `minecraft/compose.yaml` 部署為常駐專案，它僅供舊版參考。
 
+<a id="runtime"></a>
 ## 運行邏輯
 
 - 總控透過 `/var/run/docker.sock` 存取 Docker Engine，只能操作 `controller/games.json` 中註冊的固定容器名稱。
@@ -109,6 +137,7 @@ CONTROL_ACCOUNTS_JSON={"admin":"改成高強度密碼","family":"另一個密碼
 - 每次啟動或停止都會將容器重新啟動策略設為 `no`。
 - 所有遊戲每 72 小時自動備份，也可手動備份。備份前會要求伺服器儲存世界，每個遊戲只保留最新一份；Project Zomboid 使用 `zomboid/backups/zomboid-latest.tar.gz`。
 
+<a id="details"></a>
 ## 詳情與玩家管理
 
 - 遊戲卡片顯示即時 CPU、記憶體和遊戲目錄總大小。
@@ -122,8 +151,9 @@ CONTROL_ACCOUNTS_JSON={"admin":"改成高強度密碼","family":"另一個密碼
 - Palworld 支援伺服器資訊、世界狀態、玩家資訊、踢出、封鎖、公告、儲存和備份。
 - Terraria 使用 TShock，遊戲連接埠為 TCP `7777`；管理連接埠 `7878` 只綁定 NAS 本機，請勿轉送。
 - Project Zomboid 使用 Build 42 與 RCON。網際網路連線需放行 UDP `16261`–`16263`；RCON TCP `27016` 只綁定 NAS 本機。
-- 記憶體、磁碟和同時運行限制見上文「建議配置」。網頁遊戲卡片也會顯示即時 CPU、記憶體和目錄大小。
+- 各遊戲記憶體占用見上文「資源占用」。網頁遊戲卡片也會顯示即時 CPU、記憶體和目錄大小。
 
+<a id="register"></a>
 ## 註冊其他遊戲
 
 在 `controller/games.json` 的 `games` 陣列加入遊戲物件。每個遊戲可包含主服務和多個附屬服務，`startOrder` 控制啟動順序，停止時自動反向處理。
@@ -142,8 +172,29 @@ CONTROL_ACCOUNTS_JSON={"admin":"改成高強度密碼","family":"另一個密碼
 
 註冊表支援 `${ENV_NAME:-default}` 範本。新增變數時也要透過根目錄 `compose.yaml` 傳入。修改後重新啟動 `nas-game-controller`；註冊遊戲不會自動啟動。圖示可用 `"icon": "/assets/檔名"` 指向 `controller/static/assets/` 中的本機檔案。
 
+<a id="security"></a>
 ## 安全說明
 
 Docker Socket 等同較高的 NAS 容器管理權限。總控雖不接受任意容器名稱、映像或命令，仍應只在可信任區域網路或 VPN 中使用。登入後簽發 12 小時暫時工作階段；HTTP 不會加密密碼和工作階段，請勿直接將 `8088` 暴露到網際網路。遠端管理應使用 Tailscale 或可信任的 HTTPS 反向代理。
 
 玩家 IP 屬於敏感資訊，詳情頁只應在可信任網路中使用。Minecraft 若設定 `ONLINE_MODE=FALSE`，玩家名稱可能被冒用，不應直接公開到網際網路。
+
+<a id="disclaimer"></a>
+## 責任說明
+
+本專案僅供家庭或校園等**可信任區域網路學習、自用**。作者不提供網際網路部署支援，也不對任何人的使用方式作擔保。
+
+將本專案或其中的遊戲伺服器部署到網際網路、用於商業營運、散布侵權內容，或違反遊戲廠商 EULA、使用者條款及當地法律法規的行為，**均由使用者自行承擔全部責任**。由此產生的任何損失、處罰或糾紛，與作者和貢獻者無關。
+
+<a id="license"></a>
+## 開源授權
+
+本倉庫由本專案撰寫的原始碼、Compose 設定和文件採用 [MIT License](LICENSE)，可自由使用、修改和再散布。
+
+以下內容**不在** MIT 授權範圍內，仍歸各權利人所有：
+
+- Minecraft、Palworld、Terraria、Project Zomboid 的遊戲、伺服器、模組和存檔（執行時由映像或 Steam 下載，請遵守對應 EULA / 使用者條款）
+- [`controller/static/assets/`](controller/static/assets/) 中的遊戲圖示，來源見 [ATTRIBUTION.md](controller/static/assets/ATTRIBUTION.md)
+- 第三方 Docker 映像（如 `itzg/minecraft-server` 與 Palworld / Terraria / Zomboid 映像），依其各自授權使用
+
+本專案與上述遊戲廠商無關，也不是它們的官方產品。

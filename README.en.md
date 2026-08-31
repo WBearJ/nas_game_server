@@ -2,87 +2,98 @@
 
 [简体中文](README.md) | **English** | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md)
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 This project keeps only the controller running and starts game servers on demand. When the NAS or project starts, only `nas-game-controller` starts automatically. Minecraft and every other registered game remain stopped until you start them from the web interface. Game containers use `restart: no`, so they remain stopped after a NAS reboot. Automatic backups are scheduled inside the controller and require no separate backup container.
 
+**Contents**
+
+<pre>
+nas_game_server
+├── <a href="#guide">Quick start</a>
+├── <a href="#resources">Resource use</a>
+├── <a href="#layout">Project layout</a>
+│   ├── <a href="LICENSE">LICENSE</a>
+│   ├── <a href="compose.yaml">compose.yaml</a>
+│   ├── <a href=".env.example">.env.example</a>
+│   ├── <a href="controller/">controller/</a>
+│   │   ├── <a href="controller/Dockerfile">Dockerfile</a>
+│   │   ├── <a href="controller/server.py">server.py</a>
+│   │   ├── <a href="controller/games.json">games.json</a>
+│   │   └── <a href="controller/static/">static/</a>
+│   ├── <a href="minecraft/">minecraft/</a> · <a href="minecraft/README.md">notes</a>
+│   ├── <a href="palworld/">palworld/</a> · <a href="palworld/README.md">notes</a>
+│   ├── <a href="terraria/">terraria/</a> · <a href="terraria/README.md">notes</a>
+│   └── <a href="zomboid/">zomboid/</a> · <a href="zomboid/README.md">notes</a>
+├── <a href="#deploy">Deploy notes</a>
+├── <a href="#accounts">Administrator accounts</a>
+├── <a href="#runtime">Runtime behavior</a>
+├── <a href="#details">Details and player management</a>
+├── <a href="#register">Register another game</a>
+├── <a href="#security">Security</a>
+├── <a href="#disclaimer">Disclaimer</a>
+└── <a href="#license">License</a>
+</pre>
+
+<a id="guide"></a>
+## Quick start
+
+1. Copy the whole project into a folder on the NAS, for example `/volume1/docker/nas_game_server`.
+2. Copy [`.env.example`](.env.example) to `.env`. If the path is not `/volume1/docker/nas_game_server`, also set `HOST_PROJECT_PATH`.
+3. Open **Container Manager → Project**, choose **Create**, set the path to that folder, then **Add**. After build and start, only `nas-game-controller` should run.
+4. Open `http://NAS-LAN-IP:8088` in a browser. Default username `admin`, password `admin123`.
+5. Select **Start** on a game. The first start creates its containers; later you can stop or start it again at any time.
+
+<a id="resources"></a>
+## Resource use
+
+Figures below are from a home LAN. `MEMORY=14G` and `PZ_MAX_RAM=6G` in `.env` are ceilings, not typical use.
+
+| Game | RAM in use | Notes |
+| --- | --- | --- |
+| Minecraft Java (NeoForge) | About 2–4 GB | Grows with mods and player count |
+| Palworld | About 2 GB | Grows with players and bases |
+| Terraria (TShock) | About 400 MB | Lightest |
+| Project Zomboid | 6 GB Java heap cap by default | Also downloads server files on first start |
+
+A 20 GB NAS can run Minecraft, Palworld, and Terraria together. Watch total use if you also start Project Zomboid, so DSM does not start swapping.
+
+<a id="layout"></a>
 ## Project layout
 
-```text
-nas_game_server/
-├── compose.yaml              # Starts only the web controller
-├── .env                      # Admin accounts, NAS paths, and game options
-├── config/game-settings.json # Common settings saved from the web UI
-├── controller/
-│   ├── Dockerfile
-│   ├── server.py             # Docker control API and static file server
-│   ├── games.json            # Game, data path, and container registry
-│   └── static/               # Web dashboard and local game icons
-├── minecraft/
-│   ├── data/                 # World and server data
-│   ├── mods/                 # NeoForge mods
-│   ├── installer/            # Offline NeoForge installer
-│   └── backups/              # Latest automatic or manual backup
-├── palworld/
-│   ├── data/                 # Steam server, configuration, and world save
-│   └── backups/              # Latest Palworld backup
-├── terraria/
-│   ├── data/                 # World, TShock configuration, and plugins
-│   └── backups/              # Latest Terraria backup
-└── zomboid/
-    ├── data/                 # Saves, configuration, and Workshop data
-    ├── server-files/         # Build 42 server files
-    └── backups/              # Latest Project Zomboid backup
-```
+Click a name to open that file or folder. Runtime directories such as `data/` and `backups/` are created on first start and are not stored in the repository.
 
-## Recommended hardware and resource use
+- [`LICENSE`](LICENSE) — MIT license
+- [`compose.yaml`](compose.yaml) — Starts only the web controller
+- [`.env.example`](.env.example) — Template for admin accounts, NAS paths, and game options; copy to `.env`
+- `config/game-settings.json` — Common settings saved from the web UI (created at runtime)
+- [`controller/`](controller/)
+  - [`Dockerfile`](controller/Dockerfile)
+  - [`server.py`](controller/server.py) — Docker control API and static file server
+  - [`games.json`](controller/games.json) — Game, data path, and container registry
+  - [`static/`](controller/static/) — Web dashboard and local game icons
+- [`minecraft/`](minecraft/) — [Notes](minecraft/README.md)
+  - `data/` — World and server data
+  - [`mods/`](minecraft/mods/) — NeoForge mods
+  - [`installer/`](minecraft/installer/) — Offline NeoForge installer
+  - `backups/` — Latest automatic or manual backup
+- [`palworld/`](palworld/) — [Notes](palworld/README.md)
+  - `data/` — Steam server, configuration, and world save
+  - `backups/` — Latest Palworld backup
+- [`terraria/`](terraria/) — [Notes](terraria/README.md)
+  - `data/` — World, TShock configuration, and plugins
+  - `backups/` — Latest Terraria backup
+- [`zomboid/`](zomboid/) — [Notes](zomboid/README.md)
+  - `data/` — Saves, configuration, and Workshop data
+  - `server-files/` — Build 42 server files
+  - `backups/` — Latest Project Zomboid backup
 
-This project is tuned for a home LAN: the controller stays running, and game servers start on demand. Reserve about **4–6 GB** of RAM for DSM, Docker, and file cache. Do not assign all physical memory to games. Dedicated servers in this repo are x86_64; ARM Synology models generally will not run them.
+<a id="deploy"></a>
+## Deploy notes
 
-### NAS hardware
+If an older `minecraft-neoforge` project is running, back it up, confirm that its world is in `minecraft/data`, then stop and remove the old `minecraft-neoforge` container. You may also remove the obsolete `minecraft-backup` container. Remove containers only: do not delete their data or the `minecraft/data`, `mods`, `installer`, or `backups` directories.
 
-| Item | Minimum | Recommended |
-| --- | --- | --- |
-| CPU | x86_64 quad-core | 6+ cores with strong single-thread performance (Intel / AMD) |
-| RAM | 16 GB | **20 GB or more** (defaults assume a 20 GB NAS and `MEMORY=14G` for Minecraft) |
-| Storage | HDD is acceptable only for light servers such as Terraria | **SSD / NVMe**. Palworld and Project Zomboid write saves frequently; HDDs can stutter or corrupt worlds |
-| Free space | 40 GB | **80 GB or more** (Docker images + Steam server files + worlds + one backup each) |
-| Network | Gigabit LAN | Gigabit LAN; add stable upload if you host over the internet |
-
-With 32 GB or more, you can keep Minecraft at `12G` alongside Terraria, or raise Project Zomboid to 8 GB. Even then, do not run two heavy servers at once (Minecraft, Palworld, and Project Zomboid should not overlap).
-
-### Per-game resources
-
-Figures below assume a home group of 2–10 players and this repo’s default player caps. Disk use grows with worlds, mods, and backups; each game keeps only the latest archive.
-
-| | Web controller | Minecraft Java (NeoForge) | Palworld | Terraria (TShock) | Project Zomboid (Build 42) |
-| --- | --- | --- | --- | --- | --- |
-| RAM in use | About 100–300 MB | About 12–16 GB | About 8–16 GB | About 0.5–2 GB | About 5–9 GB |
-| Repo default | Always on | `MEMORY=14G` | No container memory cap; grows with players and bases | About 1 GB for 8 players on a medium world | `PZ_MAX_RAM=6144m` (6 GB Java heap; 4 / 6 / 8 GB in the UI) |
-| First-start disk | Image about 0.2–0.5 GB | Image 1–2 GB; server + mods about 2–5 GB | Steam server about 12–20 GB | Image about 0.5–1 GB | Steam server about 10–15 GB |
-| Ongoing disk | Negligible | Worlds often 2–10 GB+ | World about 1–5 GB | World 50–400 MB | Saves about 2–10 GB, plus Workshop mods |
-| CPU | Very low | 2–4 cores; mods stress single-thread performance | 4+ cores | 1–2 cores | 4 cores, single-thread heavy |
-| Default players | — | 10 | 16 | 8 | 8 |
-| 20 GB NAS | Always fine | One heavy server; Terraria can share if you lower Minecraft to `12G` | One heavy server; Terraria can share | Can run with any one heavy server | One heavy server; Terraria can share |
-
-**On a 20 GB NAS, run at the same time:**
-
-- Yes: controller + any one heavy server + Terraria
-- No: Minecraft + Palworld; Minecraft + Project Zomboid; Palworld + Project Zomboid; all three heavy servers
-
-If RAM runs out, DSM starts swapping or kills containers. That shows up as stuttering, corrupt saves, or restart loops. Stop the current heavy server in the web UI before starting another.
-
-If other memory-heavy packages are running, lower Minecraft `MEMORY` from `14G` to `12G` in `.env`. Palworld officially recommends 16 GB; 8 GB will boot but is prone to out-of-memory crashes. Project Zomboid downloads server files on first start; Java heap can be set to 4 / 6 / 8 GB in the UI.
-
-## Deploy on Synology
-
-1. Upload the entire directory to `/volume1/docker/nas_game_server`. If you use another path, update `HOST_PROJECT_PATH` in `.env`.
-2. Open `.env` and verify the admin accounts, `EULA=TRUE`, memory, ports, and Minecraft options. The defaults are username `admin` and password `admin123`. See **Recommended hardware and resource use** for RAM and disk.
-3. If an older `minecraft-neoforge` project is running, back it up, confirm that its world is in `minecraft/data`, then stop and remove the old `minecraft-neoforge` container. You may also remove the obsolete `minecraft-backup` container. Remove containers only: do not delete their data or the `minecraft/data`, `mods`, `installer`, or `backups` directories.
-4. Open **Container Manager → Project → Create**, use `nas-game-server` as the project name, select the project root, and use its `compose.yaml`.
-5. Build and start the project. Only `nas-game-controller` should appear and run.
-6. On a trusted LAN or VPN, open `http://NAS-LAN-IP:8088` and sign in with an account from `.env`.
-7. Select **Start** for any game. The first start creates its containers; later you can start, stop, or restart it directly.
-
-The Palworld REST administration password, `PALWORLD_ADMIN_PASSWORD`, also defaults to `admin123`. It is separate from the web admin password. Change both to different strong passwords for regular use. Palworld uses UDP `8211` and Steam queries use UDP `27015`. To allow internet players, open both ports in the router and Synology firewall. REST port `8212` is not published and must not be forwarded to the internet.
+The Palworld REST administration password, `PALWORLD_ADMIN_PASSWORD`, also defaults to `admin123`. It is separate from the web admin password. Palworld uses UDP `8211` and Steam queries use UDP `27015`. To allow internet players, open both ports in the router and Synology firewall. REST port `8212` is not published and must not be forwarded to the internet.
 
 Start, stop, and restart operations run in the background. Open **Logs** from the home page to view all games, or open it from a game details page to preselect that game. The log view refreshes every two seconds. During a slow first start, controller logs show directory checks, image download progress, container creation, and the start command. Do not repeatedly select Start while this is in progress.
 
@@ -97,6 +108,7 @@ docker restart nas-game-controller
 
 Force-refresh the browser after updating web files to avoid stale cached assets.
 
+<a id="accounts"></a>
 ## Administrator accounts
 
 Configure accounts with `CONTROL_ACCOUNTS_JSON` in the root `.env`:
@@ -112,10 +124,11 @@ Multiple accounts are supported:
 CONTROL_ACCOUNTS_JSON={"admin":"use-a-strong-password","family":"another-password","operator":"third-password"}
 ```
 
-Usernames may contain letters, numbers, dots, hyphens, and underscores and are limited to 32 characters. Escape quotes and backslashes in passwords according to JSON rules. After changing accounts, run `docker compose up -d --force-recreate controller`. Existing sessions become invalid immediately. The default password is suitable only for initial setup on a trusted LAN and should be changed promptly.
+Usernames may contain letters, numbers, dots, hyphens, and underscores and are limited to 32 characters. Escape quotes and backslashes in passwords according to JSON rules. After changing accounts, run `docker compose up -d --force-recreate controller`. Existing sessions become invalid immediately.
 
 “Migration required” means an unmanaged old container has the same name. Remove that container while keeping its data, then refresh. If the web port conflicts, change `CONTROL_PORT` in `.env` and recreate the controller. Do not deploy `minecraft/compose.yaml` as another permanent project; it remains only as a legacy reference.
 
+<a id="runtime"></a>
 ## Runtime behavior
 
 - The controller accesses Docker Engine through `/var/run/docker.sock` and can operate only fixed container names registered in `controller/games.json`.
@@ -124,6 +137,7 @@ Usernames may contain letters, numbers, dots, hyphens, and underscores and are l
 - Every start or stop sets the game container restart policy to `no`.
 - Every game is backed up automatically every 72 hours and can also be backed up manually. A world save is requested first, and only the latest archive is retained. Project Zomboid uses `zomboid/backups/zomboid-latest.tar.gz`.
 
+<a id="details"></a>
 ## Details and player management
 
 - Game cards show live CPU, memory, and total game-directory size.
@@ -137,8 +151,9 @@ Usernames may contain letters, numbers, dots, hyphens, and underscores and are l
 - Palworld details show server version, world GUID, FPS, frame time, world days, settings, and player account/IP/level/ping/building/location data. Players may be kicked or banned.
 - Terraria uses a stable TShock image and supports players, IPs, account groups, kick, ban, announcements, saves, and backups. Game port TCP `7777` may be published; management port `7878` is bound only to the NAS and must not be forwarded.
 - Project Zomboid uses an automatically updated Build 42 image and supports RCON players, kick, ban, announcements, saves, backups, and Workshop/Mod IDs. Internet play needs UDP `16261`–`16263`; RCON TCP `27016` is NAS-local only.
-- See **Recommended hardware and resource use** for RAM, disk, and which servers may run together. Game cards also show live CPU, memory, and directory size.
+- See **Resource use** for typical RAM. Game cards also show live CPU, memory, and directory size.
 
+<a id="register"></a>
 ## Register another game
 
 Add a game object to the `games` array in `controller/games.json`. A game can contain one primary service and companion services. `startOrder` controls start order; stop order is reversed automatically.
@@ -167,8 +182,29 @@ Add a game object to the `games` array in `controller/games.json`. A game can co
 
 The registry supports `${ENV_NAME:-default}` templates. Pass every new variable through the root `compose.yaml`. Restart `nas-game-controller` after editing the registry. Registering a game never starts it automatically. An optional `"icon": "/assets/file.png"` points to a local icon in `controller/static/assets/`; avoid runtime dependencies on external sites.
 
+<a id="security"></a>
 ## Security
 
 Docker Socket access effectively grants elevated container-management privileges. The UI does not accept arbitrary container names, images, or commands, but the controller must still be used only on a trusted LAN or VPN. Successful login creates a temporary 12-hour session. Plain HTTP does not encrypt credentials or sessions, so never expose port `8088` directly to the internet. For remote administration, use Tailscale or a trusted HTTPS reverse proxy.
 
 Player IP addresses are sensitive. Open the details page only on a trusted LAN or VPN. If Minecraft uses `ONLINE_MODE=FALSE` for offline launchers, player names can be impersonated and the server should not be exposed directly to the internet.
+
+<a id="disclaimer"></a>
+## Disclaimer
+
+This project is intended only for **learning and personal use on a trusted home or campus LAN**. The authors do not support internet-facing deployments and make no warranty about how you use it.
+
+If you publish this project or its game servers on the public internet, use it commercially, distribute infringing content, or violate a game publisher’s EULA, terms of use, or local law, **you accept full responsibility**. The authors and contributors are not liable for any resulting loss, penalty, or dispute.
+
+<a id="license"></a>
+## License
+
+Source code, Compose files, and documentation in this repository are released under the [MIT License](LICENSE).
+
+The following are **not** covered by that license and remain the property of their owners:
+
+- Minecraft, Palworld, Terraria, and Project Zomboid games, dedicated servers, mods, and saves (downloaded at runtime; follow each product’s EULA / terms)
+- Game icons in [`controller/static/assets/`](controller/static/assets/); see [ATTRIBUTION.md](controller/static/assets/ATTRIBUTION.md)
+- Third-party Docker images (such as `itzg/minecraft-server` and the Palworld / Terraria / Zomboid images), which follow their own licenses
+
+This project is independent and is not affiliated with or endorsed by those publishers.

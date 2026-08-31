@@ -2514,7 +2514,7 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     if ACCOUNTS == {"admin": "admin123"}:
-        record_log("当前仍在使用默认管理账号 admin / admin123，请仅在可信局域网中使用并尽快修改", "auth", "error")
+        record_log("当前仍在使用默认管理账号 admin / admin123，请仅在可信局域网中使用", "auth", "error")
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     record_log(f"游戏服务器总控正在监听 {HOST}:{PORT}")
     threading.Thread(target=backup_scheduler, name="backup-scheduler", daemon=True).start()

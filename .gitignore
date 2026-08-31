@@ -1,6 +1,9 @@
+# 含密码或存档，不要提交
+.env
+config/game-settings.json
+*.tar.gz
 data/
 mods/*.jar
-.env
 backups/
 .DS_Store
 __pycache__/

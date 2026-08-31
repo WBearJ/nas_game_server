@@ -2,72 +2,98 @@
 
 [简体中文](README.md) | [English](README.en.md) | [繁體中文](README.zh-TW.md) | **日本語**
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 このプロジェクトはコントローラーだけを常駐させ、ゲームサーバーを必要なときだけ起動します。NAS またはプロジェクトの起動時に自動起動するのは `nas-game-controller` のみです。Minecraft とその他の登録済みゲームは、Web 画面から起動するまで停止したままです。ゲームコンテナはすべて `restart: no` を使用するため、NAS の再起動後も自動では起動しません。自動バックアップはコントローラー内部で実行され、別のバックアップコンテナは不要です。
 
+**目次**
+
+<pre>
+nas_game_server
+├── <a href="#guide">使い方</a>
+├── <a href="#resources">リソース</a>
+├── <a href="#layout">ディレクトリ構成</a>
+│   ├── <a href="LICENSE">LICENSE</a>
+│   ├── <a href="compose.yaml">compose.yaml</a>
+│   ├── <a href=".env.example">.env.example</a>
+│   ├── <a href="controller/">controller/</a>
+│   │   ├── <a href="controller/Dockerfile">Dockerfile</a>
+│   │   ├── <a href="controller/server.py">server.py</a>
+│   │   ├── <a href="controller/games.json">games.json</a>
+│   │   └── <a href="controller/static/">static/</a>
+│   ├── <a href="minecraft/">minecraft/</a> · <a href="minecraft/README.md">説明</a>
+│   ├── <a href="palworld/">palworld/</a> · <a href="palworld/README.md">説明</a>
+│   ├── <a href="terraria/">terraria/</a> · <a href="terraria/README.md">説明</a>
+│   └── <a href="zomboid/">zomboid/</a> · <a href="zomboid/README.md">説明</a>
+├── <a href="#deploy">導入時の補足</a>
+├── <a href="#accounts">管理アカウント</a>
+├── <a href="#runtime">動作仕様</a>
+├── <a href="#details">詳細画面とプレイヤー管理</a>
+├── <a href="#register">ゲームの追加登録</a>
+├── <a href="#security">セキュリティ</a>
+├── <a href="#disclaimer">免責事項</a>
+└── <a href="#license">ライセンス</a>
+</pre>
+
+<a id="guide"></a>
+## 使い方
+
+1. プロジェクト一式を NAS のフォルダへコピーします。例：`/volume1/docker/nas_game_server`。
+2. [`.env.example`](.env.example) を `.env` にコピーします。パスが `/volume1/docker/nas_game_server` でない場合は、`HOST_PROJECT_PATH` を実際のパスに変更します。
+3. **Container Manager → プロジェクト** を開き、**作成** でコピー先フォルダを指定して **追加** します。ビルドと起動後に動くのはコントローラー `nas-game-controller` だけです。
+4. ブラウザーで `http://NASのLAN-IP:8088` を開き、管理画面に入ります。初期ユーザー名 `admin`、パスワード `admin123`。
+5. 管理画面で任意のゲームの「起動」を選びます。初回はコンテナが作成され、以降はいつでも停止・再起動できます。
+
+<a id="resources"></a>
+## リソース
+
+家庭 LAN での実測です。`.env` の `MEMORY=14G` と `PZ_MAX_RAM=6G` は上限であり、平時の使用量ではありません。
+
+| ゲーム | 実行時メモリ | 説明 |
+| --- | --- | --- |
+| Minecraft Java（NeoForge） | 約 2–4 GB | Mod と人数で増加 |
+| Palworld | 約 2 GB | 人数と建築量で増加 |
+| Terraria（TShock） | 約 400 MB | 最も軽い |
+| Project Zomboid | 既定の Java ヒープ上限 6 GB | 初回起動時にサーバー本体もダウンロード |
+
+20 GB の NAS なら Minecraft、Palworld、Terraria を同時に動かせます。Project Zomboid も足す場合は合計メモリに注意し、DSM がスワップを使い始めないようにしてください。
+
+<a id="layout"></a>
 ## ディレクトリ構成
 
-```text
-nas_game_server/
-├── compose.yaml              # Web コントローラーのみを起動
-├── .env                      # 管理アカウント、NAS パス、ゲーム設定
-├── config/game-settings.json # Web 画面で保存した一般設定
-├── controller/               # Docker API、ゲーム登録、Web 画面
-├── minecraft/                # ワールド、Mod、インストーラー、バックアップ
-├── palworld/                 # サーバー、設定、ワールド、バックアップ
-├── terraria/                 # ワールド、TShock 設定、プラグイン、バックアップ
-└── zomboid/                  # セーブ、Build 42、Workshop データ、バックアップ
-```
+名前をクリックすると、そのファイルまたはフォルダを開けます。`data/` や `backups/` などの実行時ディレクトリは初回起動時に自動作成され、リポジトリには含まれません。
 
-## 推奨構成
+- [`LICENSE`](LICENSE) — MIT ライセンス
+- [`compose.yaml`](compose.yaml) — Web コントローラーのみを起動
+- [`.env.example`](.env.example) — 管理アカウント、NAS パス、ゲーム設定のテンプレート。`.env` にコピーして使用
+- `config/game-settings.json` — Web 画面で保存した一般設定（実行後に生成）
+- [`controller/`](controller/)
+  - [`Dockerfile`](controller/Dockerfile)
+  - [`server.py`](controller/server.py) — Docker 制御 API と静的ファイル配信
+  - [`games.json`](controller/games.json) — ゲーム、データパス、コンテナ登録
+  - [`static/`](controller/static/) — Web 管理画面とローカルのゲームアイコン
+- [`minecraft/`](minecraft/) — [説明](minecraft/README.md)
+  - `data/` — ワールドとサーバーデータ
+  - [`mods/`](minecraft/mods/) — NeoForge Mod
+  - [`installer/`](minecraft/installer/) — オフライン NeoForge インストーラー
+  - `backups/` — 自動・手動バックアップ（最新 1 件のみ）
+- [`palworld/`](palworld/) — [説明](palworld/README.md)
+  - `data/` — Steam サーバー、設定、ワールドセーブ
+  - `backups/` — Palworld の最新バックアップ
+- [`terraria/`](terraria/) — [説明](terraria/README.md)
+  - `data/` — ワールド、TShock 設定、プラグイン
+  - `backups/` — Terraria の最新バックアップ
+- [`zomboid/`](zomboid/) — [説明](zomboid/README.md)
+  - `data/` — セーブ、設定、Workshop データ
+  - `server-files/` — Build 42 サーバー本体
+  - `backups/` — Project Zomboid の最新バックアップ
 
-家庭 LAN 向けに、コントローラー常駐・ゲームは必要なときだけ起動する前提で調整しています。DSM、Docker、ファイルキャッシュ用に約 **4–6 GB** のメモリを残し、物理 RAM をすべてゲームへ割り当てないでください。本リポジトリのゲームサーバーはほぼ x86_64 専用で、ARM の Synology では一般に動作しません。
+<a id="deploy"></a>
+## 導入時の補足
 
-### NAS ハードウェア
+古い `minecraft-neoforge` プロジェクトが動作中の場合はバックアップを作成し、ワールドが `minecraft/data` にあることを確認してから古いコンテナを停止・削除します。旧 `minecraft-backup` コンテナも削除できます。コンテナだけを削除し、データや `minecraft/data`、`mods`、`installer`、`backups` は削除しないでください。
 
-| 項目 | 最低 | 推奨 |
-| --- | --- | --- |
-| CPU | x86_64 4 コア | 6 コア以上、単一スレッド性能が高いもの（Intel / AMD） |
-| メモリ | 16 GB | **20 GB 以上**（既定値は 20 GB NAS 向けで、Minecraft に `14G` を割り当て） |
-| ストレージ | HDD は Terraria のような軽量サーバー向け | **SSD / NVMe**。Palworld と Project Zomboid はセーブ書き込みが多く、HDD では遅延や破損の原因になる |
-| 空き容量 | 40 GB | **80 GB 以上**（Docker イメージ + Steam サーバー本体 + ワールド + 各ゲーム 1 件のバックアップ） |
-| ネットワーク | ギガビット LAN | ギガビット LAN。インターネット公開時は安定した上り帯域も必要 |
-
-32 GB 以上あれば、Minecraft を `12G` に下げて Terraria と常時併用したり、Project Zomboid を 8 GB に上げたりできます。メモリに余裕があっても、大型サーバーを 2 つ同時に動かさないでください（Minecraft、Palworld、Project Zomboid は重ねない）。
-
-### ゲームごとのリソース
-
-家庭 2–10 人、本リポジトリの既定プレイヤー数を想定した目安です。ディスクはワールド、Mod、バックアップとともに増えます。各ゲームのバックアップは最新 1 件のみ保持します。
-
-| | Web コントローラー | Minecraft Java（NeoForge） | Palworld | Terraria（TShock） | Project Zomboid（Build 42） |
-| --- | --- | --- | --- | --- | --- |
-| 実行時メモリ | 約 100–300 MB | 約 12–16 GB | 約 8–16 GB | 約 0.5–2 GB | 約 5–9 GB |
-| リポジトリ既定 | 常駐 | `MEMORY=14G` | コンテナ上限なし。人数と建築量で増加 | 8 人・中型ワールドで約 1 GB | `PZ_MAX_RAM=6144m`（Java ヒープ 6 GB、UI で 4 / 6 / 8 GB） |
-| 初回ディスク | イメージ約 0.2–0.5 GB | イメージ 1–2 GB、サーバー + Mod 約 2–5 GB | Steam サーバー約 12–20 GB | イメージ約 0.5–1 GB | Steam サーバー約 10–15 GB |
-| 運用ディスク | ほぼ無視可 | ワールドはよく 2–10 GB+ | ワールド約 1–5 GB | ワールド 50–400 MB | セーブ約 2–10 GB、Workshop Mod は別途 |
-| CPU | ごく低い | 2–4 コア。Mod が多いほど単一スレッド負荷が高い | 4 コア以上 | 1–2 コア | 4 コア、単一スレッド寄り |
-| 既定人数 | — | 10 | 16 | 8 | 8 |
-| 20 GB NAS | 常時可 | 大型サーバーは単独。Terraria 併用時は Minecraft を `12G` に下げる | 大型サーバーは単独。Terraria は併用可 | 任意の大型サーバー 1 つと併用可 | 大型サーバーは単独。Terraria は併用可 |
-
-**20 GB メモリの NAS での同時起動：**
-
-- 可：コントローラー + 大型サーバー 1 つ + Terraria
-- 不可：Minecraft + Palworld、Minecraft + Project Zomboid、Palworld + Project Zomboid、大型サーバー 3 つ同時
-
-メモリ不足になると、DSM がスワップを使い始めるかコンテナを強制終了します。カクつき、セーブ破損、再起動ループとして現れます。別の大型ゲームを始める前に、Web 画面で現在の大型サーバーを停止してください。
-
-他のメモリ消費の大きいパッケージと併用する場合は、`.env` の Minecraft `MEMORY` を `14G` から `12G` へ下げます。Palworld の公式推奨は 16 GB で、8 GB でも起動しますがメモリ不足クラッシュが起きやすいです。Project Zomboid は初回起動時にサーバー本体をダウンロードし、Java ヒープは UI で 4 / 6 / 8 GB に変更できます。
-
-## Synology への導入
-
-1. ディレクトリ全体を `/volume1/docker/nas_game_server` にアップロードします。別のパスを使う場合は `.env` の `HOST_PROJECT_PATH` も変更してください。
-2. `.env` を開き、管理アカウント、`EULA=TRUE`、メモリ、ポート、Minecraft の設定を確認します。初期アカウントは `admin`、パスワードは `admin123` です。メモリとディスクは上記「推奨構成」を参照してください。
-3. 古い `minecraft-neoforge` プロジェクトが動作中の場合はバックアップを作成し、ワールドが `minecraft/data` にあることを確認してから古いコンテナを停止・削除します。旧 `minecraft-backup` コンテナも削除できます。コンテナだけを削除し、データや `minecraft/data`、`mods`、`installer`、`backups` は削除しないでください。
-4. **Container Manager → プロジェクト → 作成**を開き、プロジェクト名に `nas-game-server` を入力し、ルートディレクトリの `compose.yaml` を使用します。
-5. プロジェクトをビルドして起動します。実行されるのは `nas-game-controller` だけです。
-6. 信頼できる LAN または VPN から `http://NASのLAN-IP:8088` を開き、`.env` のアカウントでログインします。
-7. 任意のゲームで「起動」を選択します。初回はコンテナが作成され、以降は直接起動、停止、再起動できます。
-
-Palworld の REST 管理パスワード `PALWORLD_ADMIN_PASSWORD` も初期値は `admin123` です。Web 管理アカウントとは別の設定なので、通常利用前にそれぞれ異なる強力なパスワードへ変更してください。ゲームは UDP `8211`、Steam クエリは UDP `27015` を使用します。インターネットから接続させる場合は、ルーターと Synology ファイアウォールの両方で許可してください。REST ポート `8212` は公開されていないため、インターネットへ転送しないでください。
+Palworld の REST 管理パスワード `PALWORLD_ADMIN_PASSWORD` も初期値は `admin123` です。Web 管理アカウントとは別の設定です。ゲームは UDP `8211`、Steam クエリは UDP `27015` を使用します。インターネットから接続させる場合は、ルーターと Synology ファイアウォールの両方で許可してください。REST ポート `8212` は公開されていないため、インターネットへ転送しないでください。
 
 起動、停止、再起動はバックグラウンドで実行されます。ホーム画面の「ログ」では全ゲーム、詳細画面から開いた場合はそのゲームが最初に選択され、2 秒ごとに更新されます。初回起動が長い場合、ディレクトリ確認、イメージ取得、コンテナ作成、起動コマンドが順番に表示されます。進行中に起動を繰り返し選択しないでください。
 
@@ -82,6 +108,7 @@ docker restart nas-game-controller
 
 Web ファイル更新後は、古いキャッシュを使わないようブラウザーを強制再読み込みしてください。
 
+<a id="accounts"></a>
 ## 管理アカウント
 
 ルートの `.env` で設定します。
@@ -97,10 +124,11 @@ CONTROL_SESSION_TTL_SECONDS=43200
 CONTROL_ACCOUNTS_JSON={"admin":"strong-password","family":"another-password","operator":"third-password"}
 ```
 
-ユーザー名には英数字、ピリオド、ハイフン、アンダースコアを使用でき、最大 32 文字です。パスワード内の引用符とバックスラッシュは JSON の規則に従ってエスケープしてください。変更後に `docker compose up -d --force-recreate controller` を実行すると、既存のセッションは直ちに無効になります。初期パスワードは信頼できる LAN での初期設定専用です。速やかに変更してください。
+ユーザー名には英数字、ピリオド、ハイフン、アンダースコアを使用でき、最大 32 文字です。パスワード内の引用符とバックスラッシュは JSON の規則に従ってエスケープしてください。変更後に `docker compose up -d --force-recreate controller` を実行すると、既存のセッションは直ちに無効になります。
 
 画面に「移行が必要」と表示される場合、管理対象外の同名コンテナが残っています。データを保持したまま古いコンテナを削除し、画面を更新してください。Web ポートが競合する場合は `.env` の `CONTROL_PORT` を変更してコントローラーを再作成します。`minecraft/compose.yaml` は旧構成の参考用であり、常駐プロジェクトとして別途起動しないでください。
 
+<a id="runtime"></a>
 ## 動作仕様
 
 - コントローラーは `/var/run/docker.sock` 経由で Docker Engine に接続し、`controller/games.json` に登録された固定コンテナ名だけを操作します。
@@ -109,6 +137,7 @@ CONTROL_ACCOUNTS_JSON={"admin":"strong-password","family":"another-password","op
 - 起動または停止のたびに、ゲームコンテナの再起動ポリシーを `no` にします。
 - すべてのゲームを 72 時間ごとに自動バックアップでき、手動バックアップにも対応します。先にワールド保存を要求し、最新の 1 件だけを保持します。Project Zomboid は `zomboid/backups/zomboid-latest.tar.gz` を使用します。
 
+<a id="details"></a>
 ## 詳細画面とプレイヤー管理
 
 - ゲームカードには CPU、メモリ、ゲームディレクトリ全体のサイズが表示されます。
@@ -122,8 +151,9 @@ CONTROL_ACCOUNTS_JSON={"admin":"strong-password","family":"another-password","op
 - Palworld はサーバー・ワールド情報、プレイヤー情報、キック、BAN、通知、保存、バックアップに対応します。
 - Terraria は TShock を使用します。ゲームポートは TCP `7777`、管理ポート `7878` は NAS ローカル専用で、外部へ転送しないでください。
 - Project Zomboid は Build 42 と RCON を使用します。外部接続には UDP `16261`–`16263` が必要で、RCON TCP `27016` は NAS ローカル専用です。
-- メモリ、ディスク、同時起動の制限は上記「推奨構成」を参照してください。ゲームカードにも CPU、メモリ、ディレクトリサイズがリアルタイム表示されます。
+- メモリの目安は上記「リソース」を参照してください。ゲームカードにも CPU、メモリ、ディレクトリサイズがリアルタイム表示されます。
 
+<a id="register"></a>
 ## ゲームの追加登録
 
 `controller/games.json` の `games` 配列へゲームオブジェクトを追加します。1 つのゲームにプライマリサービスと複数の付随サービスを設定でき、`startOrder` が起動順を制御します。停止時は逆順です。
@@ -142,8 +172,29 @@ CONTROL_ACCOUNTS_JSON={"admin":"strong-password","family":"another-password","op
 
 登録ファイルは `${ENV_NAME:-default}` 形式に対応します。新しい環境変数はルートの `compose.yaml` からコントローラーへ渡してください。変更後に `nas-game-controller` を再起動します。登録しただけではゲームは起動しません。`"icon": "/assets/file.png"` で `controller/static/assets/` 内のローカル画像を指定できます。
 
+<a id="security"></a>
 ## セキュリティ
 
 Docker Socket へのアクセスには高いコンテナ管理権限があります。画面から任意のコンテナ名、イメージ、コマンドを入力することはできませんが、コントローラーは信頼できる LAN または VPN 内だけで使用してください。ログイン後の一時セッションは 12 時間有効です。HTTP は認証情報やセッションを暗号化しないため、`8088` をインターネットへ直接公開しないでください。リモート管理には Tailscale または信頼できる HTTPS リバースプロキシを使用してください。
 
 プレイヤーの IP アドレスは機密情報です。詳細画面は信頼できるネットワーク内だけで使用してください。Minecraft で `ONLINE_MODE=FALSE` を設定するとプレイヤー名を偽装できるため、サーバーをインターネットへ直接公開しないでください。
+
+<a id="disclaimer"></a>
+## 免責事項
+
+本プロジェクトは家庭やキャンパスなど**信頼できる LAN での学習・個人利用**を想定しています。作者はインターネット公開の導入をサポートせず、利用方法について保証しません。
+
+本プロジェクトやゲームサーバーをインターネットへ公開したり、商用利用したり、侵害コンテンツを配布したり、ゲームパブリッシャーの EULA・利用規約や現地法令に違反したりした場合、**その責任はすべて利用者にあります**。それによって生じた損失、処分、紛争について、作者および貢献者は責任を負いません。
+
+<a id="license"></a>
+## ライセンス
+
+本リポジトリのうち、本プロジェクトが作成したソースコード、Compose 設定、ドキュメントは [MIT License](LICENSE) です。自由に利用、改変、再配布できます。
+
+次のものは MIT の対象外で、各権利者に帰属します。
+
+- Minecraft、Palworld、Terraria、Project Zomboid のゲーム本体、専用サーバー、Mod、セーブ（実行時にイメージまたは Steam から取得。各 EULA / 利用規約に従ってください）
+- [`controller/static/assets/`](controller/static/assets/) のゲームアイコン。出典は [ATTRIBUTION.md](controller/static/assets/ATTRIBUTION.md)
+- 第三者の Docker イメージ（`itzg/minecraft-server` や Palworld / Terraria / Zomboid など）。各イメージ自身のライセンスに従います
+
+本プロジェクトはこれらのパブリッシャー公式製品ではなく、提携・後援もありません。
