@@ -23,6 +23,16 @@ const logsButton = document.querySelector("#logsButton");
 const refreshButton = document.querySelector("#refreshButton");
 const logoutButton = document.querySelector("#logoutButton");
 const logDialog = document.querySelector("#logDialog");
+const uploadDialog = document.querySelector("#uploadDialog");
+const uploadTitle = document.querySelector("#uploadTitle");
+const uploadSummary = document.querySelector("#uploadSummary");
+const uploadList = document.querySelector("#uploadList");
+const closeUploadButton = document.querySelector("#closeUploadButton");
+const confirmDialog = document.querySelector("#confirmDialog");
+const confirmTitle = document.querySelector("#confirmTitle");
+const confirmMessage = document.querySelector("#confirmMessage");
+const confirmCancel = document.querySelector("#confirmCancel");
+const confirmAccept = document.querySelector("#confirmAccept");
 const logOperationStatus = document.querySelector("#logOperationStatus");
 const logOutput = document.querySelector("#logOutput");
 const logFilter = document.querySelector("#logFilter");
@@ -259,6 +269,20 @@ function setMetricValue(root, key, value) {
   if (node && node.textContent !== value) node.textContent = value;
 }
 
+function gameErrorText(game) {
+  if (activeOperation.running && activeOperation.gameId === game.id) return "";
+  return String(game.error || "").trim();
+}
+
+function syncGameError(card, game) {
+  const text = gameErrorText(game);
+  const node = card.querySelector(".game-error");
+  if (!node) return;
+  node.hidden = !text;
+  node.textContent = text ? tt(text) : "";
+  card.classList.toggle("has-error", Boolean(text));
+}
+
 function actionButton(label, action, game, secondary = false) {
   const button = createElement("button", `action-button${secondary ? " secondary" : ""}`, label);
   button.type = "button";
@@ -282,6 +306,11 @@ function renderGameActions(actions, game) {
   details.type = "button";
   details.addEventListener("click", () => openGameDetail(game.id));
   actions.append(details);
+  const remove = createElement("button", "action-button danger", "删除");
+  remove.type = "button";
+  remove.disabled = Boolean(activeOperation.running);
+  remove.addEventListener("click", () => deleteGame(game));
+  actions.append(remove);
 }
 
 function renderGame(game) {
@@ -357,8 +386,11 @@ function renderGame(game) {
   const actions = createElement("div", "game-actions");
   renderGameActions(actions, game);
   actions.dataset.signature = `${game.state}:${Boolean(activeOperation.running)}`;
-  content.append(head, metrics, actions);
+  const error = createElement("p", "game-error");
+  error.setAttribute("role", "alert");
+  content.append(head, metrics, actions, error);
   card.append(visual, content);
+  syncGameError(card, game);
   return card;
 }
 
@@ -383,6 +415,7 @@ function updateGameCard(card, game) {
     "pink"
   );
   setMetricValue(card, "disk", formatBytes(game.metrics?.diskBytes));
+  syncGameError(card, game);
   const actions = card.querySelector(".game-actions");
   const signature = `${game.state}:${Boolean(activeOperation.running)}`;
   if (actions?.dataset.signature !== signature) {
@@ -448,13 +481,16 @@ function renderCatalogGame(game) {
     imageShell.append(image);
   }
   const content = createElement("div", "catalog-content");
-  content.append(
-    createElement("h3", "", game.name),
-    createElement("p", "catalog-description", game.description)
-  );
-  const facts = createElement("dl", "catalog-facts");
-  facts.append(fact("版本", game.version), fact("加载器", game.loader), fact("连接端口", game.endpoint));
-  content.append(facts);
+  content.append(createElement("h3", "", game.name));
+  const pendingSetup = Boolean(game.setup && !game.added);
+  if (!pendingSetup && game.description) {
+    content.append(createElement("p", "catalog-description", game.description));
+  }
+  if (!pendingSetup) {
+    const facts = createElement("dl", "catalog-facts");
+    facts.append(fact("版本", game.version), fact("加载器", game.loader), fact("连接端口", game.endpoint));
+    content.append(facts);
+  }
   const button = createElement(
     "button",
     `action-button${game.added ? " secondary" : ""}`,
@@ -571,6 +607,183 @@ function collectSettingsFrom(root) {
   return values;
 }
 
+function collectJarFiles(fileList) {
+  const jars = [];
+  let rejected = false;
+  for (const file of fileList || []) {
+    if (file.name.toLowerCase().endsWith(".jar")) jars.push(file);
+    else rejected = true;
+  }
+  if (rejected) setMessage("只能添加 .jar 格式的 Mod 文件", true);
+  return jars;
+}
+
+function createModDropzone({ disabled = false, onFiles }) {
+  const zone = createElement("label", `mod-dropzone${disabled ? " is-disabled" : ""}`);
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".jar,application/java-archive";
+  input.multiple = true;
+  input.hidden = true;
+  input.disabled = disabled;
+  zone.append(
+    input,
+    createElement("strong", "", "拖拽 .jar 到此处，或点击选择"),
+    createElement("span", "", "支持同时选择多个 Mod 文件")
+  );
+  const take = (list) => {
+    if (disabled || input.disabled) return;
+    const jars = collectJarFiles(list);
+    if (jars.length) onFiles(jars);
+  };
+  zone.addEventListener("dragenter", (event) => {
+    event.preventDefault();
+    if (!input.disabled) zone.classList.add("is-dragover");
+  });
+  zone.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    if (!input.disabled) zone.classList.add("is-dragover");
+  });
+  zone.addEventListener("dragleave", (event) => {
+    if (!zone.contains(event.relatedTarget)) zone.classList.remove("is-dragover");
+  });
+  zone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    zone.classList.remove("is-dragover");
+    take(event.dataTransfer?.files);
+  });
+  input.addEventListener("change", () => {
+    take(input.files);
+    input.value = "";
+  });
+  return zone;
+}
+
+function formatUploadProgress(loaded, total) {
+  if (!total) return formatBytes(loaded);
+  return `${formatBytes(loaded)} / ${formatBytes(total)}`;
+}
+
+function setUploadRow(row, { status, percent, detail, error = false }) {
+  row.classList.toggle("is-error", error);
+  row.classList.toggle("is-done", status === "完成");
+  row.classList.toggle("is-active", status === "上传中");
+  row.querySelector(".upload-row-status").textContent = tt(status);
+  row.querySelector(".upload-row-detail").textContent = detail || "";
+  row.querySelector(".upload-row-bar span").style.width = `${Math.max(0, Math.min(100, percent || 0))}%`;
+}
+
+function openUploadDialog(title, files) {
+  uploadTitle.textContent = tt(title);
+  uploadSummary.textContent = tt("准备上传");
+  closeUploadButton.disabled = true;
+  closeUploadButton.textContent = tt("关闭");
+  uploadList.replaceChildren();
+  const rows = files.map((file) => {
+    const row = createElement("article", "upload-row");
+    const identity = createElement("div", "upload-row-identity");
+    identity.append(
+      createElement("strong", "", file.name),
+      createElement("span", "upload-row-detail", formatBytes(file.size))
+    );
+    const meta = createElement("div", "upload-row-meta");
+    meta.append(createElement("span", "upload-row-status", "等待中"));
+    const bar = createElement("div", "upload-row-bar");
+    bar.append(document.createElement("span"));
+    row.append(identity, meta, bar);
+    uploadList.append(row);
+    return row;
+  });
+  if (!uploadDialog.open) uploadDialog.showModal();
+  return rows;
+}
+
+function closeUploadDialog() {
+  if (uploadDialog.open) uploadDialog.close();
+}
+
+function uploadModFile(gameId, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/games/${gameId}/mods/upload`);
+    xhr.setRequestHeader("X-Control-Session", sessionToken);
+    xhr.setRequestHeader("X-Control-Language", i18n.locale);
+    xhr.setRequestHeader("Content-Type", "application/java-archive");
+    xhr.setRequestHeader("X-Mod-Filename", encodeURIComponent(file.name));
+    xhr.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) onProgress(event.loaded, event.total);
+    });
+    xhr.addEventListener("load", () => {
+      let payload = {};
+      try {
+        payload = JSON.parse(xhr.responseText || "{}");
+      } catch {
+        payload = { error: t("总控返回了无法识别的响应") };
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress(file.size, file.size);
+        resolve(payload);
+        return;
+      }
+      reject(new Error(tt(payload.error || `请求失败：${xhr.status}`)));
+    });
+    xhr.addEventListener("error", () => reject(new Error(t("Mod 添加失败"))));
+    xhr.addEventListener("abort", () => reject(new Error(t("Mod 添加失败"))));
+    xhr.send(file);
+  });
+}
+
+async function startModUploads(gameId, files, rows) {
+  let uploaded = 0;
+  try {
+    for (const [index, file] of files.entries()) {
+      uploadSummary.textContent = tt(`正在上传 ${index + 1}/${files.length}：${file.name}`);
+      setUploadRow(rows[index], {
+        status: "上传中",
+        percent: 0,
+        detail: `${formatBytes(0)} / ${formatBytes(file.size)}`
+      });
+      await uploadModFile(gameId, file, (loaded, total) => {
+        const percent = total ? Math.round((loaded / total) * 100) : 0;
+        setUploadRow(rows[index], {
+          status: "上传中",
+          percent,
+          detail: `${formatUploadProgress(loaded, total)} · ${percent}%`
+        });
+      });
+      setUploadRow(rows[index], {
+        status: "完成",
+        percent: 100,
+        detail: `${formatBytes(file.size)} · 100%`
+      });
+      uploaded += 1;
+    }
+    uploadSummary.textContent = tt(`已添加 ${uploaded} 个 Mod，重启服务器后生效`);
+    return { uploaded };
+  } catch (error) {
+    const failed = rows[uploaded];
+    if (failed) {
+      setUploadRow(failed, {
+        status: "失败",
+        percent: 0,
+        detail: error.message,
+        error: true
+      });
+    }
+    uploadSummary.textContent = uploaded
+      ? tt(`已添加 ${uploaded} 个 Mod，后续上传失败：${error.message}`)
+      : tt(`Mod 添加失败：${error.message}`);
+    throw error;
+  } finally {
+    closeUploadButton.disabled = false;
+  }
+}
+
+async function uploadModFiles(gameId, files, title = "正在上传 Mod") {
+  if (!files?.length) return { uploaded: 0 };
+  return startModUploads(gameId, files, openUploadDialog(title, files));
+}
+
 function renderGameSetup(game, payload) {
   const form = createElement("form", "setup-form glass-panel");
   const heading = createElement("div", "setup-heading");
@@ -585,9 +798,6 @@ function renderGameSetup(game, payload) {
   mods.dataset.setupMods = "true";
   const pending = [];
   const list = createElement("div", "mod-list");
-  const note = createElement("p", "mod-note", "可选。原版不显示此项；模组服可在创建时上传 .jar，启动后生效。");
-  const pick = createElement("button", "player-action", "添加 Mod");
-  pick.type = "button";
   const renderPending = () => {
     list.replaceChildren();
     if (!pending.length) {
@@ -608,31 +818,23 @@ function renderGameSetup(game, payload) {
       list.append(row);
     }
   };
-  pick.addEventListener("click", () => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".jar,application/java-archive";
-    input.multiple = true;
-    input.hidden = true;
-    document.body.append(input);
-    input.addEventListener("change", () => {
-      for (const file of input.files || []) {
-        if (!file.name.toLowerCase().endsWith(".jar")) {
-          setMessage("只能添加 .jar 格式的 Mod 文件", true);
-          continue;
-        }
-        if (!pending.some((item) => item.name === file.name && item.size === file.size)) pending.push(file);
-      }
-      input.remove();
-      renderPending();
-    }, { once: true });
-    input.click();
-  });
+  const addPending = (files) => {
+    for (const file of files) {
+      if (!pending.some((item) => item.name === file.name && item.size === file.size)) pending.push(file);
+    }
+    renderPending();
+  };
+  const dropzone = createModDropzone({ onFiles: addPending });
   const modsHeading = createElement("div", "panel-heading");
   const modsTitle = document.createElement("div");
   modsTitle.append(createElement("p", "eyebrow", "Mod"), createElement("h2", "", "初始化 Mod"));
-  modsHeading.append(modsTitle, pick);
-  mods.append(modsHeading, note, list);
+  modsHeading.append(modsTitle);
+  mods.append(
+    modsHeading,
+    createElement("p", "mod-note", "可选。原版不显示此项；模组服可在创建时上传 .jar，启动后生效。"),
+    dropzone,
+    list
+  );
   renderPending();
   const actions = createElement("div", "setup-actions");
   const cancel = createElement("button", "action-button secondary", "返回游戏库");
@@ -647,6 +849,11 @@ function renderGameSetup(game, payload) {
     cancel.disabled = true;
     try {
       const settings = collectSettingsFrom(form);
+      let rows = [];
+      if (pending.length) {
+        rows = openUploadDialog("正在添加游戏", pending);
+        uploadSummary.textContent = tt("正在保存游戏配置");
+      }
       const payloadResult = await api(`/api/game-library/${game.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -655,19 +862,12 @@ function renderGameSetup(game, payload) {
       let uploaded = 0;
       const loader = settings.loader || "neoforge";
       const allowMods = payload.runtime?.loaders?.find((item) => item.id === loader)?.mods !== false && loader !== "vanilla";
-      if (allowMods) {
-        for (const file of pending) {
-          setMessage(`正在上传 ${file.name}`);
-          await api(`/api/games/${game.id}/mods/upload`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/java-archive",
-              "X-Mod-Filename": encodeURIComponent(file.name)
-            },
-            body: file
-          });
-          uploaded += 1;
-        }
+      if (allowMods && pending.length) {
+        uploadTitle.textContent = tt("正在上传 Mod");
+        uploaded = (await startModUploads(game.id, pending, rows)).uploaded;
+      } else if (uploadDialog.open) {
+        uploadSummary.textContent = tt(payloadResult.message);
+        closeUploadButton.disabled = false;
       }
       setMessage(uploaded ? `${payloadResult.message}，并已上传 ${uploaded} 个 Mod` : payloadResult.message);
       closeGameSetup();
@@ -676,6 +876,10 @@ function renderGameSetup(game, payload) {
       setMessage(error.message, true);
       submit.disabled = false;
       cancel.disabled = false;
+      if (uploadDialog.open) {
+        uploadSummary.textContent = error.message;
+        closeUploadButton.disabled = false;
+      }
     }
   });
   form.append(heading, fields, mods, actions);
@@ -981,43 +1185,20 @@ function renderSettingsPanel(game) {
   return panel;
 }
 
-function chooseMod(gameId) {
-  if (modBusy) return;
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = ".jar,application/java-archive";
-  input.hidden = true;
-  document.body.append(input);
-  const cleanup = () => input.remove();
-  input.addEventListener("cancel", cleanup, { once: true });
-  input.addEventListener("change", async () => {
-    const file = input.files?.[0];
-    cleanup();
-    if (!file) return;
-    if (!file.name.toLowerCase().endsWith(".jar")) {
-      setMessage("只能添加 .jar 格式的 Mod 文件", true);
-      return;
-    }
-    modBusy = true;
-    setMessage(`正在上传 ${file.name}`);
-    try {
-      const payload = await api(`/api/games/${gameId}/mods/upload`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/java-archive",
-          "X-Mod-Filename": encodeURIComponent(file.name)
-        },
-        body: file
-      });
-      setMessage(payload.message);
-    } catch (error) {
-      setMessage(`Mod 添加失败：${error.message}`, true);
-    } finally {
-      modBusy = false;
-      if (activeGameId === gameId) await loadGameDetail({ quiet: true });
-    }
-  }, { once: true });
-  input.click();
+async function uploadMods(gameId, files) {
+  if (modBusy || !files?.length) return;
+  modBusy = true;
+  try {
+    const result = await uploadModFiles(gameId, files);
+    setMessage(result.uploaded > 1
+      ? `已添加 ${result.uploaded} 个 Mod，重启服务器后生效`
+      : `已添加 ${files[0].name}，重启服务器后生效`);
+  } catch (error) {
+    setMessage(error.message, true);
+  } finally {
+    modBusy = false;
+    if (activeGameId === gameId) await loadGameDetail({ quiet: true });
+  }
 }
 
 async function deleteMod(gameId, filename) {
@@ -1122,11 +1303,6 @@ function renderDetail(game) {
   modsTitle.append(createElement("p", "eyebrow", game.loader || "Mod"), createElement("h2", "", "Mod 管理"));
   const modsActions = createElement("div", "mods-heading-actions");
   modsActions.append(createElement("strong", "panel-count", String(game.mods?.length || 0)));
-  const addMod = createElement("button", "player-action", "添加 Mod");
-  addMod.type = "button";
-  addMod.disabled = modBusy;
-  addMod.addEventListener("click", () => chooseMod(game.id));
-  modsActions.append(addMod);
   modsHeading.append(modsTitle, modsActions);
   const modList = createElement("div", "mod-list");
   if (!game.mods?.length) {
@@ -1137,6 +1313,7 @@ function renderDetail(game) {
   modsPanel.append(
     modsHeading,
     createElement("p", "mod-note", "添加或删除后需要重启 Minecraft 服务器才能生效。"),
+    createModDropzone({ disabled: modBusy, onFiles: (files) => uploadMods(game.id, files) }),
     modList
   );
 
@@ -1442,6 +1619,55 @@ async function loadGames({ quiet = false } = {}) {
   }
 }
 
+async function confirmDanger({ title, message, confirmLabel = "确认删除" }) {
+  return new Promise((resolve) => {
+    let settled = false;
+    confirmTitle.textContent = tt(title);
+    confirmMessage.textContent = tt(message);
+    confirmAccept.textContent = tt(confirmLabel);
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      confirmDialog.removeEventListener("close", onClose);
+      if (confirmDialog.open) confirmDialog.close();
+      resolve(value);
+    };
+    const onClose = () => finish(false);
+    confirmAccept.onclick = () => finish(true);
+    confirmCancel.onclick = () => finish(false);
+    confirmDialog.addEventListener("close", onClose);
+    confirmDialog.showModal();
+  });
+}
+
+async function deleteGame(game) {
+  const confirmed = await confirmDanger({
+    title: `删除 ${game.name}？`,
+    message: "将停止服务器，并永久删除世界、模组、备份和容器。此操作无法恢复。"
+  });
+  if (!confirmed) return;
+  if (activeOperation.running) {
+    setMessage(`正在执行：${activeOperation.message}`, true);
+    openLogs(game.id);
+    return;
+  }
+  busyGame = game.id;
+  setMessage(`正在删除 ${game.name}`);
+  try {
+    const payload = await api(`/api/games/${game.id}`, { method: "DELETE" });
+    activeOperation = payload.operation;
+    setMessage(`${payload.operation.message}。日志窗口会持续显示进度。`);
+    openLogs(game.id);
+    await monitorAction(game.id, "删除");
+    if (activeGameId === game.id) closeGameDetail();
+  } catch (error) {
+    setMessage(error.message, true);
+    if (error.status === 409) openLogs(game.id);
+    busyGame = null;
+    await loadGames({ quiet: true });
+  }
+}
+
 async function runAction(gameId, action, label) {
   if (activeOperation.running) {
     setMessage(`正在执行：${activeOperation.message}`, true);
@@ -1482,6 +1708,7 @@ async function monitorAction(gameId, label) {
     } else {
       setMessage(operation.message || `${label}操作已完成`);
     }
+    if (label === "删除" && activeGameId === gameId) closeGameDetail();
     if (logDialog.open) await loadLogs();
     if (activeGameId === gameId) await loadGameDetail({ quiet: true });
     return;
@@ -1672,6 +1899,10 @@ logDialog.addEventListener("close", () => {
     window.clearInterval(logPollTimer);
     logPollTimer = null;
   }
+});
+closeUploadButton.addEventListener("click", closeUploadDialog);
+uploadDialog.addEventListener("cancel", (event) => {
+  if (closeUploadButton.disabled) event.preventDefault();
 });
 logoutButton.addEventListener("click", () => logout("", true));
 

@@ -5,6 +5,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import socket
 import struct
 import tarfile
@@ -54,6 +55,8 @@ OPERATION = {
     "finishedAt": None,
     "error": None
 }
+GAME_LAST_ERROR = {}
+START_VERIFY_SECONDS = 1
 
 
 def now_iso():
@@ -150,6 +153,52 @@ def update_operation(**changes):
 def operation_snapshot():
     with STATE_LOCK:
         return dict(OPERATION)
+
+
+def set_game_error(game_id, message):
+    with STATE_LOCK:
+        GAME_LAST_ERROR[game_id] = str(message)
+
+
+def clear_game_error(game_id):
+    with STATE_LOCK:
+        GAME_LAST_ERROR.pop(game_id, None)
+
+
+def game_error_text(game_id):
+    with STATE_LOCK:
+        return GAME_LAST_ERROR.get(game_id) or ""
+
+
+def last_log_excerpt(text, limit=240):
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    if not lines:
+        return ""
+    excerpt = lines[-1]
+    if len(excerpt) > limit:
+        return excerpt[-limit:]
+    return excerpt
+
+
+def ensure_start_succeeded(spec):
+    if START_VERIFY_SECONDS > 0:
+        time.sleep(START_VERIFY_SECONDS)
+    info = DOCKER.inspect(spec["name"])
+    if info is None:
+        raise DockerError(500, f"容器 {spec['name']} 启动后无法读取状态")
+    state = info.get("State") or {}
+    status = str(state.get("Status") or "")
+    if status not in ("exited", "dead"):
+        return
+    detail = str(state.get("Error") or "").strip()
+    if not detail:
+        try:
+            detail = last_log_excerpt(DOCKER.logs(spec["name"], tail=40))
+        except DockerError:
+            detail = ""
+    if not detail:
+        detail = f"容器启动后立即退出（退出码 {state.get('ExitCode', '?')}）"
+    raise DockerError(500, detail)
 
 
 class DockerError(RuntimeError):
@@ -867,6 +916,44 @@ def clamp_minecraft_version(loader_id, version, fetch=True):
     return allowed[0] if allowed else version
 
 
+NEOFORGE_INSTALLER_FILENAME = re.compile(r"^neoforge-(.+)-installer\.jar$", re.IGNORECASE)
+
+
+def version_parts(version):
+    parts = []
+    for item in str(version or "").split("."):
+        digits = "".join(character for character in item if character.isdigit())
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts)
+
+
+def local_neoforge_installer(mc_version, relative="minecraft/installer"):
+    if not HOST_PROJECT_MOUNT.is_dir():
+        return None
+    try:
+        directory = safe_host_path(relative)
+    except DockerError:
+        return None
+    if not directory.is_dir():
+        return None
+    matches = []
+    for path in directory.iterdir():
+        if not path.is_file():
+            continue
+        parsed = NEOFORGE_INSTALLER_FILENAME.fullmatch(path.name)
+        if not parsed:
+            continue
+        nf_version = parsed.group(1)
+        if neoforge_minecraft_version(nf_version) != str(mc_version):
+            continue
+        matches.append((version_parts(nf_version), nf_version, path.name))
+    if not matches:
+        return None
+    matches.sort()
+    _, nf_version, name = matches[-1]
+    return nf_version, f"/installer/{name}"
+
+
 def apply_minecraft_runtime(game, values=None):
     if game.get("id") != "minecraft":
         return
@@ -889,7 +976,12 @@ def apply_minecraft_runtime(game, values=None):
     for key in LOADER_ENV_KEYS:
         environment.pop(key, None)
     if loader_id == "neoforge":
-        environment["NEOFORGE_VERSION"] = "latest"
+        local = local_neoforge_installer(version)
+        if local:
+            environment["NEOFORGE_VERSION"] = local[0]
+            environment["NEOFORGE_INSTALLER"] = local[1]
+        else:
+            environment["NEOFORGE_VERSION"] = "latest"
     elif loader_id == "forge":
         environment["FORGE_VERSION"] = "RECOMMENDED"
     spec["image"] = minecraft_image_for_version(version)
@@ -967,6 +1059,7 @@ def public_game(game):
         "supportsMods": bool(game.get("supportsMods", game.get("id") == "minecraft")),
         "state": state,
         "health": primary.get("health") if primary else None,
+        "error": game_error_text(game["id"]),
         "containers": containers,
         "metrics": game_metrics(game, containers)
     }
@@ -1803,6 +1896,7 @@ def prepare_host_paths(game):
 def ensure_game(game):
     update_operation(message="正在检查 NAS 数据目录")
     prepare_host_paths(game)
+    apply_minecraft_runtime(game, read_settings_store().get(game.get("id"), {}))
     for requirement in game.get("requiredEnvironment", []):
         value = str(os.environ.get(requirement.get("name", ""), "")).strip()
         invalid = {str(item) for item in requirement.get("invalid", [])}
@@ -1947,29 +2041,49 @@ def validate_settings(game, submitted):
     return normalized
 
 
-def persist_settings(game, values):
+def write_settings_store_update(game_id, values):
     path = settings_store_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         stored = read_settings_store()
-        current = stored.get(game["id"], {})
+        current = stored.get(game_id, {})
         if not isinstance(current, dict):
             current = {}
         current.update(values)
-        stored[game["id"]] = current
+        stored[game_id] = current
         temporary = path.with_name(f".{path.name}.{threading.get_ident()}.tmp")
         temporary.write_text(json.dumps(stored, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         os.replace(temporary, path)
     except OSError as exc:
         raise DockerError(500, f"无法保存网页配置：{exc}") from exc
+    return stored
+
+
+def persist_settings(game, values):
+    stored = write_settings_store_update(game["id"], values)
     for definition in game.get("settings", []):
         if definition.get("key") in values:
             apply_setting_value(game, definition, values[definition["key"]])
-    apply_minecraft_runtime(game, stored.get(game["id"], current))
+    apply_minecraft_runtime(game, stored.get(game["id"], {}))
     with STATE_LOCK:
         PALWORLD_DETAIL_CACHE.pop(game["id"], None)
         TERRARIA_DETAIL_CACHE.pop(game["id"], None)
         ZOMBOID_DETAIL_CACHE.pop(game["id"], None)
+
+
+def clear_game_settings(game):
+    path = settings_store_path()
+    stored = read_settings_store()
+    if game["id"] not in stored:
+        return
+    stored.pop(game["id"], None)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f".{path.name}.{threading.get_ident()}.tmp")
+        temporary.write_text(json.dumps(stored, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.replace(temporary, path)
+    except OSError as exc:
+        raise DockerError(500, f"无法保存网页配置：{exc}") from exc
 
 
 def send_console(game, command):
@@ -2134,6 +2248,7 @@ def run_action(game, action):
             record_log(f"正在启动容器 {spec['name']}", game["id"])
             DOCKER.start(spec["name"])
             record_log(f"容器 {spec['name']} 启动指令已发送", game["id"])
+            ensure_start_succeeded(spec)
     elif action == "stop":
         for spec in reversed(specs):
             info = DOCKER.inspect(spec["name"])
@@ -2160,6 +2275,7 @@ def run_action(game, action):
             record_log(f"正在启动容器 {spec['name']}", game["id"])
             DOCKER.start(spec["name"])
             record_log(f"容器 {spec['name']} 启动指令已发送", game["id"])
+            ensure_start_succeeded(spec)
     elif action == "backup":
         create_backup(game)
     elif action == "save":
@@ -2169,19 +2285,78 @@ def run_action(game, action):
         raise ValueError("不支持的操作")
 
 
+def delete_game_files(game):
+    relatives = []
+    for relative in game.get("hostDirectories", []):
+        relatives.append(relative)
+    backup_directory = (game.get("backup") or {}).get("directory")
+    if backup_directory:
+        relatives.append(backup_directory)
+    seen = set()
+    for relative in relatives:
+        if relative in seen:
+            continue
+        seen.add(relative)
+        path = safe_host_path(relative)
+        if not path.exists():
+            continue
+        try:
+            if path.is_symlink() or path.is_file():
+                path.unlink()
+            elif path.is_dir():
+                shutil.rmtree(path)
+        except OSError as exc:
+            raise DockerError(500, f"无法删除 {relative}：{exc}") from exc
+        record_log(f"已删除游戏文件：{relative}", game["id"])
+    with STATE_LOCK:
+        METRICS_CACHE.pop(game["id"], None)
+        RUNTIME_METRICS_CACHE.pop(game["id"], None)
+        PLAYER_EVENTS_CACHE.pop(game["id"], None)
+        PALWORLD_DETAIL_CACHE.pop(game["id"], None)
+        TERRARIA_DETAIL_CACHE.pop(game["id"], None)
+        ZOMBOID_DETAIL_CACHE.pop(game["id"], None)
+        GAME_LAST_ERROR.pop(game["id"], None)
+
+
+def purge_game(game):
+    specs = sorted(game.get("containers", []), key=lambda item: item.get("startOrder", 0), reverse=True)
+    for spec in specs:
+        info = DOCKER.inspect(spec["name"])
+        if info is None:
+            continue
+        assert_managed(game, spec, info)
+        if info.get("State", {}).get("Status") == "running":
+            update_operation(message=f"正在停止 {spec['name']}")
+            record_log(f"正在停止容器 {spec['name']}", game["id"])
+            DOCKER.disable_auto_restart(spec["name"])
+            DOCKER.stop(spec["name"], spec.get("stopTimeout", 120))
+        update_operation(message=f"正在删除容器 {spec['name']}")
+        record_log(f"正在删除容器 {spec['name']}", game["id"])
+        DOCKER.remove(spec["name"])
+        record_log(f"容器 {spec['name']} 已删除", game["id"])
+    update_operation(message=f"正在删除 {game['name']} 的世界、模组和备份")
+    delete_game_files(game)
+    clear_game_settings(game)
+    with STATE_LOCK:
+        persist_added_game_ids([game_id for game_id in read_added_game_ids() if game_id != game["id"]])
+
+
 ACTION_LABELS = {
     "start": "启动",
     "stop": "停止",
     "restart": "重启",
     "backup": "备份",
     "save": "保存世界",
-    "settings": "应用配置"
+    "settings": "应用配置",
+    "delete": "删除"
 }
 
 
 def action_worker(game, action):
     label = ACTION_LABELS[action]
     try:
+        if action in ("start", "restart"):
+            clear_game_error(game["id"])
         record_log(f"开始{label} {game['name']}", game["id"])
         run_action(game, action)
         message = f"{game['name']} {label}操作已完成"
@@ -2192,9 +2367,13 @@ def action_worker(game, action):
             finishedAt=now_iso(),
             error=None
         )
+        if action in ("start", "restart"):
+            clear_game_error(game["id"])
     except (DockerError, KeyError, ValueError, RuntimeError) as exc:
         message = f"{game['name']} {label}失败：{exc}"
         record_log(message, game["id"], "error")
+        if action in ("start", "restart"):
+            set_game_error(game["id"], f"{label}失败：{exc}")
         update_operation(
             running=False,
             message=message,
@@ -2204,6 +2383,8 @@ def action_worker(game, action):
     except Exception as exc:
         message = f"{game['name']} {label}发生未预期错误：{exc}"
         record_log(message, game["id"], "error")
+        if action in ("start", "restart"):
+            set_game_error(game["id"], f"{label}失败：{exc}")
         update_operation(
             running=False,
             message=message,
@@ -2250,6 +2431,25 @@ def settings_worker(game):
         update_operation(running=False, message=message, finishedAt=now_iso(), error=None)
     except Exception as exc:
         message = f"{game['name']} 配置应用失败：{exc}"
+        record_log(message, game["id"], "error")
+        update_operation(running=False, message=message, finishedAt=now_iso(), error=str(exc))
+    finally:
+        ACTION_LOCK.release()
+
+
+def purge_worker(game):
+    try:
+        record_log(f"开始删除 {game['name']}", game["id"])
+        purge_game(game)
+        message = f"已删除 {game['name']}，世界、模组和备份已清除"
+        record_log(message, game["id"])
+        update_operation(running=False, message=message, finishedAt=now_iso(), error=None)
+    except (DockerError, KeyError, ValueError, RuntimeError) as exc:
+        message = f"{game['name']} 删除失败：{exc}"
+        record_log(message, game["id"], "error")
+        update_operation(running=False, message=message, finishedAt=now_iso(), error=str(exc))
+    except Exception as exc:
+        message = f"{game['name']} 删除发生未预期错误：{exc}"
         record_log(message, game["id"], "error")
         update_operation(running=False, message=message, finishedAt=now_iso(), error=str(exc))
     finally:
@@ -2840,6 +3040,48 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_response(200, {"message": f"已移除 {game['name']}，服务器数据未删除"})
             except (DockerError, RuntimeError) as exc:
                 self.json_response(getattr(exc, "status", 500), {"error": str(exc)})
+            return
+        game_match = re.fullmatch(r"/api/games/([a-z0-9_-]+)", path)
+        if game_match:
+            game = GAME_INDEX.get(game_match.group(1))
+            if game is None:
+                self.json_response(404, {"error": "游戏未注册"})
+                return
+            if not ACTION_LOCK.acquire(blocking=False):
+                operation = operation_snapshot()
+                self.json_response(409, {
+                    "error": f"另一个操作正在执行：{operation.get('message', '请稍后再试')}",
+                    "operation": operation
+                })
+                return
+            operation = update_operation(
+                running=True,
+                gameId=game["id"],
+                gameName=game["name"],
+                action="delete",
+                message=f"准备删除 {game['name']}",
+                startedAt=now_iso(),
+                finishedAt=None,
+                error=None
+            )
+            worker = threading.Thread(
+                target=purge_worker,
+                args=(game,),
+                name=f"game-delete-{game['id']}",
+                daemon=True
+            )
+            try:
+                worker.start()
+            except Exception as exc:
+                ACTION_LOCK.release()
+                update_operation(
+                    running=False,
+                    message=f"无法创建后台操作：{exc}",
+                    finishedAt=now_iso(),
+                    error=str(exc)
+                )
+                raise
+            self.json_response(202, {"accepted": True, "operation": operation})
             return
         mod_match = re.fullmatch(r"/api/games/([a-z0-9_-]+)/mods/(.+)", path)
         if not mod_match:

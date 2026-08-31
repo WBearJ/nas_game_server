@@ -24,9 +24,7 @@ minecraft-synology/
 3. 可选启用白名单：设置 `ENABLE_WHITELIST=TRUE`，并在 `WHITELIST` 填写允许加入的用户名。
 4. `EULA=TRUE` 表示接受 [Minecraft EULA](https://aka.ms/MinecraftEULA)；如不同意，请不要启动。
 
-中国大陆网络若无法稳定访问 NeoForge Maven，可在 `.env` 的 `PROXY` 填入 NAS 能访问的 HTTP 代理，格式为 `主机:端口`。代理运行在 NAS 本机且允许相关连接时可使用 `127.0.0.1:端口`；代理运行在路由器或另一台电脑时填写它的局域网 IP，且必须开启“允许局域网连接”。
-
-本项目默认从 `installer/neoforge-26.2.0.62-installer.jar` 使用本地安装器。请确保该文件随项目一起上传；如果升级 NeoForge，需要同时修改 `.env` 中的 `NEOFORGE_VERSION`、`NEOFORGE_INSTALLER` 和安装器文件名。
+中国大陆网络下 `maven.neoforged.net` 没有官方国内镜像。请把安装器 jar 放到 `installer/`，完整步骤见仓库根目录 [README.md「大陆网络手动安装 NeoForge」](../README.md#neoforge-offline)。也可在 `.env` 的 `PROXY` 填入 NAS 能访问的 HTTP 代理，格式为 `主机:端口`。
 
 如遇到 `Permission denied`，通过 SSH 执行 `id 你的群晖用户名`，把输出中的 `uid` 和 `gid` 分别填入 `PUID`、`PGID`。
 
