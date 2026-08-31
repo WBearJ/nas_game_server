@@ -2,6 +2,8 @@
 
 [简体中文](README.md) | **English** | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md)
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 This project keeps only the controller running and starts game servers on demand. When the NAS or project starts, only `nas-game-controller` starts automatically. Minecraft and every other registered game remain stopped until you start them from the web interface. Game containers use `restart: no`, so they remain stopped after a NAS reboot. Automatic backups are scheduled inside the controller and require no separate backup container.
 
 **Contents**
@@ -10,6 +12,7 @@ This project keeps only the controller running and starts game servers on demand
 nas_game_server
 ├── <a href="#guide">Quick start</a>
 ├── <a href="#layout">Project layout</a>
+│   ├── <a href="LICENSE">LICENSE</a>
 │   ├── <a href="compose.yaml">compose.yaml</a>
 │   ├── <a href=".env.example">.env.example</a>
 │   ├── <a href="controller/">controller/</a>
@@ -26,14 +29,16 @@ nas_game_server
 ├── <a href="#runtime">Runtime behavior</a>
 ├── <a href="#details">Details and player management</a>
 ├── <a href="#register">Register another game</a>
-└── <a href="#security">Security</a>
+├── <a href="#security">Security</a>
+├── <a href="#disclaimer">Disclaimer</a>
+└── <a href="#license">License</a>
 </pre>
 
 <a id="guide"></a>
 ## Quick start
 
 1. Copy the whole project into a folder on the NAS, for example `/volume1/docker/nas_game_server`.
-2. Make sure that folder contains `.env`. If not, copy [`.env.example`](.env.example) to `.env`. If the path is not `/volume1/docker/nas_game_server`, set `HOST_PROJECT_PATH` to the real path.
+2. Copy [`.env.example`](.env.example) to `.env` (never commit `.env`). If the path is not `/volume1/docker/nas_game_server`, also set `HOST_PROJECT_PATH`.
 3. Open **Container Manager → Project**, choose **Create**, set the path to that folder, then **Add**. After build and start, only `nas-game-controller` should run.
 4. Open `http://NAS-LAN-IP:8088` in a browser. Default username `admin`, password `admin123`.
 5. Select **Start** on a game. The first start creates its containers; later you can stop or start it again at any time.
@@ -43,9 +48,10 @@ nas_game_server
 
 Click a name to open that file or folder. Runtime directories such as `data/` and `backups/` are created on first start and are not stored in the repository.
 
+- [`LICENSE`](LICENSE) — MIT license
 - [`compose.yaml`](compose.yaml) — Starts only the web controller
-- [`.env.example`](.env.example) — Template for admin accounts, NAS paths, and game options; copy to `.env`
-- `config/game-settings.json` — Common settings saved from the web UI (created at runtime)
+- [`.env.example`](.env.example) — Template for admin accounts, NAS paths, and game options; copy to `.env` and fill in. Do not commit `.env`
+- `config/game-settings.json` — Common settings saved from the web UI (created at runtime; may contain passwords)
 - [`controller/`](controller/)
   - [`Dockerfile`](controller/Dockerfile)
   - [`server.py`](controller/server.py) — Docker control API and static file server
@@ -72,7 +78,7 @@ Click a name to open that file or folder. Runtime directories such as `data/` an
 
 If an older `minecraft-neoforge` project is running, back it up, confirm that its world is in `minecraft/data`, then stop and remove the old `minecraft-neoforge` container. You may also remove the obsolete `minecraft-backup` container. Remove containers only: do not delete their data or the `minecraft/data`, `mods`, `installer`, or `backups` directories.
 
-The Palworld REST administration password, `PALWORLD_ADMIN_PASSWORD`, also defaults to `admin123`. It is separate from the web admin password. Change both to different strong passwords for regular use. Palworld uses UDP `8211` and Steam queries use UDP `27015`. To allow internet players, open both ports in the router and Synology firewall. REST port `8212` is not published and must not be forwarded to the internet.
+The Palworld REST administration password, `PALWORLD_ADMIN_PASSWORD`, also defaults to `admin123`. It is separate from the web admin password. Palworld uses UDP `8211` and Steam queries use UDP `27015`. To allow internet players, open both ports in the router and Synology firewall. REST port `8212` is not published and must not be forwarded to the internet.
 
 Start, stop, and restart operations run in the background. Open **Logs** from the home page to view all games, or open it from a game details page to preselect that game. The log view refreshes every two seconds. During a slow first start, controller logs show directory checks, image download progress, container creation, and the start command. Do not repeatedly select Start while this is in progress.
 
@@ -103,7 +109,7 @@ Multiple accounts are supported:
 CONTROL_ACCOUNTS_JSON={"admin":"use-a-strong-password","family":"another-password","operator":"third-password"}
 ```
 
-Usernames may contain letters, numbers, dots, hyphens, and underscores and are limited to 32 characters. Escape quotes and backslashes in passwords according to JSON rules. After changing accounts, run `docker compose up -d --force-recreate controller`. Existing sessions become invalid immediately. The default password is suitable only for initial setup on a trusted LAN and should be changed promptly.
+Usernames may contain letters, numbers, dots, hyphens, and underscores and are limited to 32 characters. Escape quotes and backslashes in passwords according to JSON rules. After changing accounts, run `docker compose up -d --force-recreate controller`. Existing sessions become invalid immediately. `.env` contains secrets and is gitignored; never commit it.
 
 “Migration required” means an unmanaged old container has the same name. Remove that container while keeping its data, then refresh. If the web port conflicts, change `CONTROL_PORT` in `.env` and recreate the controller. Do not deploy `minecraft/compose.yaml` as another permanent project; it remains only as a legacy reference.
 
@@ -167,3 +173,23 @@ The registry supports `${ENV_NAME:-default}` templates. Pass every new variable 
 Docker Socket access effectively grants elevated container-management privileges. The UI does not accept arbitrary container names, images, or commands, but the controller must still be used only on a trusted LAN or VPN. Successful login creates a temporary 12-hour session. Plain HTTP does not encrypt credentials or sessions, so never expose port `8088` directly to the internet. For remote administration, use Tailscale or a trusted HTTPS reverse proxy.
 
 Player IP addresses are sensitive. Open the details page only on a trusted LAN or VPN. If Minecraft uses `ONLINE_MODE=FALSE` for offline launchers, player names can be impersonated and the server should not be exposed directly to the internet.
+
+<a id="disclaimer"></a>
+## Disclaimer
+
+This project is intended only for **learning and personal use on a trusted home or campus LAN**. The authors do not support internet-facing deployments and make no warranty about how you use it.
+
+If you publish this project or its game servers on the public internet, use it commercially, distribute infringing content, or violate a game publisher’s EULA, terms of use, or local law, **you accept full responsibility**. The authors and contributors are not liable for any resulting loss, penalty, or dispute.
+
+<a id="license"></a>
+## License
+
+Source code, Compose files, and documentation in this repository are released under the [MIT License](LICENSE).
+
+The following are **not** covered by that license and remain the property of their owners:
+
+- Minecraft, Palworld, Terraria, and Project Zomboid games, dedicated servers, mods, and saves (downloaded at runtime; follow each product’s EULA / terms)
+- Game icons in [`controller/static/assets/`](controller/static/assets/); see [ATTRIBUTION.md](controller/static/assets/ATTRIBUTION.md)
+- Third-party Docker images (such as `itzg/minecraft-server` and the Palworld / Terraria / Zomboid images), which follow their own licenses
+
+This project is independent and is not affiliated with or endorsed by those publishers. Do not commit `.env`, world saves, or `config/game-settings.json` (it may contain passwords).

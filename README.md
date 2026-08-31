@@ -2,6 +2,8 @@
 
 **简体中文** | [English](README.en.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md)
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 该项目采用“总控常驻、游戏按需启动”的方式运行。NAS 或项目首次启动时只有 `nas-game-controller` 自动启动；Minecraft 和以后注册的其他游戏服务都不会自动启动。游戏容器由网页端创建和控制，并统一使用 `restart: no`，因此 NAS 重启后仍保持停止，直到你再次点击启动。自动备份由总控内部定时器负责，不需要额外的备份容器。
 
 **文档目录**
@@ -10,6 +12,7 @@
 nas_game_server
 ├── <a href="#guide">使用教程</a>
 ├── <a href="#layout">目录结构</a>
+│   ├── <a href="LICENSE">LICENSE</a>
 │   ├── <a href="compose.yaml">compose.yaml</a>
 │   ├── <a href=".env.example">.env.example</a>
 │   ├── <a href="controller/">controller/</a>
@@ -26,14 +29,16 @@ nas_game_server
 ├── <a href="#runtime">运行逻辑</a>
 ├── <a href="#details">网页详情与玩家管理</a>
 ├── <a href="#register">注册其他游戏</a>
-└── <a href="#security">安全说明</a>
+├── <a href="#security">安全说明</a>
+├── <a href="#disclaimer">责任说明</a>
+└── <a href="#license">开源协议</a>
 </pre>
 
 <a id="guide"></a>
 ## 使用教程
 
 1. 把整个项目复制到 NAS 的一个文件夹，例如 `/volume1/docker/nas_game_server`。
-2. 确认该目录里有 `.env`。没有的话，把 [`.env.example`](.env.example) 复制一份改名为 `.env`。路径如果不是 `/volume1/docker/nas_game_server`，把其中的 `HOST_PROJECT_PATH` 改成实际路径。
+2. 把 [`.env.example`](.env.example) 复制为 `.env`（不要提交 `.env`）。路径如果不是 `/volume1/docker/nas_game_server`，把其中的 `HOST_PROJECT_PATH` 改成实际路径。
 3. 打开群晖 **Container Manager → 项目**，点 **新增**，路径选刚复制的项目文件夹，再点 **添加**。构建并启动后，只会运行总控 `nas-game-controller`。
 4. 浏览器打开 `http://NAS的局域网IP:8088` 进入管理页。默认账号 `admin`，默认密码 `admin123`。
 5. 在管理页点击某个游戏的「启动」。第一次会创建对应容器，之后可随时停止或再启动。
@@ -43,9 +48,10 @@ nas_game_server
 
 点击文件名可直接打开对应内容。`data/`、`backups/` 等运行时目录首次启动游戏时自动创建，仓库里默认不包含。
 
+- [`LICENSE`](LICENSE) — MIT 开源协议
 - [`compose.yaml`](compose.yaml) — 只启动网页总控
-- [`.env.example`](.env.example) — 管理账号、NAS 路径和游戏参数模板，复制为 `.env` 后使用
-- `config/game-settings.json` — 网页保存的游戏常用配置（运行后生成）
+- [`.env.example`](.env.example) — 管理账号、NAS 路径和游戏参数模板，复制为 `.env` 后填写；`.env` 不要提交
+- `config/game-settings.json` — 网页保存的游戏常用配置（运行后生成，含密码，不要公开）
 - [`controller/`](controller/)
   - [`Dockerfile`](controller/Dockerfile)
   - [`server.py`](controller/server.py) — Docker 控制 API 与静态文件服务
@@ -72,7 +78,7 @@ nas_game_server
 
 若旧的 `minecraft-neoforge` 项目仍在运行，先备份并确认世界位于 `minecraft/data`，再停止并删除旧项目中的 `minecraft-neoforge` 容器。旧版本若还留有 `minecraft-backup` 容器，也可停止并删除；新版已经不再使用它。只删除容器，不要勾选删除数据，也不要删除 `minecraft/data`、`mods`、`installer` 或 `backups` 文件夹。
 
-幻兽帕鲁内部 REST 管理密码 `PALWORLD_ADMIN_PASSWORD` 默认也是 `admin123`，首次部署可以直接启动。它与网页管理账号是两个独立配置；正式使用时建议分别改成不同的高强度密码并重新创建总控。游戏默认使用 UDP `8211`，Steam 查询使用 UDP `27015`；若要让公网玩家加入，需要在路由器和群晖防火墙中同时放行对应 UDP 端口。REST 管理端口 `8212` 没有发布，不要自行转发到公网。
+幻兽帕鲁内部 REST 管理密码 `PALWORLD_ADMIN_PASSWORD` 默认也是 `admin123`，首次部署可以直接启动。它与网页管理账号是两个独立配置。游戏默认使用 UDP `8211`，Steam 查询使用 UDP `27015`；若要让公网玩家加入，需要在路由器和群晖防火墙中同时放行对应 UDP 端口。REST 管理端口 `8212` 没有发布，不要自行转发到公网。
 
 启动、停止和重启会在后台执行，网页不会因镜像下载或游戏初始化而长时间卡住。点击首页顶部的“日志”默认查看全部游戏；从游戏详情页点击“查看日志”会默认筛选当前游戏，也可以通过下拉框切换任意游戏。日志窗口每2秒自动刷新。
 
@@ -105,7 +111,7 @@ CONTROL_SESSION_TTL_SECONDS=43200
 CONTROL_ACCOUNTS_JSON={"admin":"换成高强度密码","family":"另一个密码","operator":"第三个密码"}
 ```
 
-账号只能使用英文字母、数字、点、横线和下划线，最长32个字符。密码写在 JSON 字符串中，若包含双引号或反斜杠，需要按 JSON 规则转义。修改账号后执行 `docker compose up -d --force-recreate controller`；已有网页会话会立即失效，需要重新登录。默认密码只适合可信局域网内首次使用，建议部署后尽快修改。
+账号只能使用英文字母、数字、点、横线和下划线，最长32个字符。密码写在 JSON 字符串中，若包含双引号或反斜杠，需要按 JSON 规则转义。修改账号后执行 `docker compose up -d --force-recreate controller`；已有网页会话会立即失效，需要重新登录。`.env` 含密码，已加入 `.gitignore`，不要提交到 Git。
 
 如果页面显示“需迁移”，说明仍存在同名旧容器。删除旧容器并保留数据后刷新页面即可；总控不会擅自接管或删除非本项目创建的容器。
 
@@ -175,3 +181,23 @@ CONTROL_ACCOUNTS_JSON={"admin":"换成高强度密码","family":"另一个密码
 Docker Socket 等同于较高的 NAS 容器管理权限。本项目没有提供任意容器名称、镜像或命令的网页输入，但总控仍应仅在可信局域网或 VPN 中使用。账号密码登录成功后会签发12小时的临时会话；HTTP 不会加密登录密码或会话，不要直接把 `8088` 转发到公网。需要公网管理时，应使用 Tailscale，或在受信任的 HTTPS 反向代理后访问。
 
 玩家 IP 属于敏感管理信息，详情页只应在可信局域网或 VPN 中使用。Minecraft 若为了兼容 PCL 离线账号设置 `ONLINE_MODE=FALSE`，玩家名称可被冒用，也不应直接开放公网。
+
+<a id="disclaimer"></a>
+## 责任说明
+
+本项目仅供家庭或校园等**可信内网学习、自用**。作者不提供公网部署支持，也不对任何人的使用方式作担保。
+
+将本项目或其中的游戏服务端部署到公网、用于商业运营、传播侵权内容，或违反游戏厂商 EULA、用户协议及当地法律法规的行为，**均由使用者自行承担全部责任**。由此产生的任何损失、处罚或纠纷，与作者和贡献者无关。
+
+<a id="license"></a>
+## 开源协议
+
+本仓库由本项目编写的源代码、Compose 配置和文档采用 [MIT License](LICENSE)，可自由使用、修改和再分发。
+
+以下内容**不在** MIT 授权范围内，仍归各权利人所有：
+
+- Minecraft、幻兽帕鲁、Terraria、Project Zomboid 的游戏、服务端、模组和存档（运行时由镜像或 Steam 下载，请遵守对应 EULA / 用户协议）
+- [`controller/static/assets/`](controller/static/assets/) 中的游戏图标，来源见 [ATTRIBUTION.md](controller/static/assets/ATTRIBUTION.md)
+- 第三方 Docker 镜像（如 `itzg/minecraft-server`、帕鲁 / Terraria / Zomboid 镜像），按其各自协议使用
+
+本项目与上述游戏厂商无关，也不是它们的官方产品。请勿把 `.env`、世界存档或含密码的 `config/game-settings.json` 提交到 Git。

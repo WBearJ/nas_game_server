@@ -2,6 +2,8 @@
 
 [简体中文](README.md) | [English](README.en.md) | **繁體中文** | [日本語](README.ja.md)
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 本專案採用「總控常駐、遊戲按需啟動」的方式運行。NAS 或專案首次啟動時只有 `nas-game-controller` 自動啟動；Minecraft 和其他已註冊的遊戲服務不會自動啟動。遊戲容器統一使用 `restart: no`，因此 NAS 重新啟動後仍會保持停止，直到你再次於網頁啟動。自動備份由總控內部排程負責，不需要額外的備份容器。
 
 **文件目錄**
@@ -10,6 +12,7 @@
 nas_game_server
 ├── <a href="#guide">使用教學</a>
 ├── <a href="#layout">目錄結構</a>
+│   ├── <a href="LICENSE">LICENSE</a>
 │   ├── <a href="compose.yaml">compose.yaml</a>
 │   ├── <a href=".env.example">.env.example</a>
 │   ├── <a href="controller/">controller/</a>
@@ -26,14 +29,16 @@ nas_game_server
 ├── <a href="#runtime">運行邏輯</a>
 ├── <a href="#details">詳情與玩家管理</a>
 ├── <a href="#register">註冊其他遊戲</a>
-└── <a href="#security">安全說明</a>
+├── <a href="#security">安全說明</a>
+├── <a href="#disclaimer">責任說明</a>
+└── <a href="#license">開源授權</a>
 </pre>
 
 <a id="guide"></a>
 ## 使用教學
 
 1. 把整個專案複製到 NAS 的一個資料夾，例如 `/volume1/docker/nas_game_server`。
-2. 確認該目錄裡有 `.env`。沒有的話，把 [`.env.example`](.env.example) 複製一份改名為 `.env`。路徑如果不是 `/volume1/docker/nas_game_server`，把其中的 `HOST_PROJECT_PATH` 改成實際路徑。
+2. 把 [`.env.example`](.env.example) 複製為 `.env`（不要提交 `.env`）。路徑如果不是 `/volume1/docker/nas_game_server`，把其中的 `HOST_PROJECT_PATH` 改成實際路徑。
 3. 開啟 Synology **Container Manager → 專案**，點 **新增**，路徑選剛複製的專案資料夾，再點 **加入**。建置並啟動後，只會運行總控 `nas-game-controller`。
 4. 瀏覽器開啟 `http://NAS的區域網路IP:8088` 進入管理頁。預設帳號 `admin`，預設密碼 `admin123`。
 5. 在管理頁點選某個遊戲的「啟動」。第一次會建立對應容器，之後可隨時停止或再啟動。
@@ -43,9 +48,10 @@ nas_game_server
 
 點選檔名即可開啟對應內容。`data/`、`backups/` 等執行時目錄會在首次啟動遊戲時自動建立，倉庫預設不包含。
 
+- [`LICENSE`](LICENSE) — MIT 開源授權
 - [`compose.yaml`](compose.yaml) — 只啟動網頁總控
-- [`.env.example`](.env.example) — 管理帳號、NAS 路徑和遊戲參數範本，複製為 `.env` 後使用
-- `config/game-settings.json` — 網頁儲存的常用設定（執行後產生）
+- [`.env.example`](.env.example) — 管理帳號、NAS 路徑和遊戲參數範本，複製為 `.env` 後填寫；`.env` 不要提交
+- `config/game-settings.json` — 網頁儲存的常用設定（執行後產生，含密碼，不要公開）
 - [`controller/`](controller/)
   - [`Dockerfile`](controller/Dockerfile)
   - [`server.py`](controller/server.py) — Docker 控制 API 與靜態檔案服務
@@ -72,7 +78,7 @@ nas_game_server
 
 若舊的 `minecraft-neoforge` 專案仍在運行，先備份並確認世界位於 `minecraft/data`，再停止並刪除舊容器。舊版 `minecraft-backup` 容器也可刪除。只刪除容器，不要刪除資料或 `minecraft/data`、`mods`、`installer`、`backups` 目錄。
 
-Palworld REST 管理密碼 `PALWORLD_ADMIN_PASSWORD` 預設也是 `admin123`，它與網頁管理帳號是兩套獨立設定。正式使用時請分別改成不同的高強度密碼。遊戲使用 UDP `8211`，Steam 查詢使用 UDP `27015`；允許網際網路玩家加入時，必須同時在路由器和 Synology 防火牆放行。REST 連接埠 `8212` 未發布，不要轉送到網際網路。
+Palworld REST 管理密碼 `PALWORLD_ADMIN_PASSWORD` 預設也是 `admin123`，它與網頁管理帳號是兩套獨立設定。遊戲使用 UDP `8211`，Steam 查詢使用 UDP `27015`；允許網際網路玩家加入時，必須同時在路由器和 Synology 防火牆放行。REST 連接埠 `8212` 未發布，不要轉送到網際網路。
 
 啟動、停止和重新啟動會在背景執行。首頁的「日誌」預設顯示所有遊戲，詳情頁則預選目前遊戲；日誌每兩秒更新。首次啟動較慢時，總控會依序顯示目錄檢查、映像下載、容器建立和啟動命令。請依進度等待，不要重複點選啟動。
 
@@ -103,7 +109,7 @@ CONTROL_SESSION_TTL_SECONDS=43200
 CONTROL_ACCOUNTS_JSON={"admin":"改成高強度密碼","family":"另一個密碼","operator":"第三個密碼"}
 ```
 
-帳號只能包含英文字母、數字、點、連字號和底線，最長 32 個字元。密碼中的引號和反斜線需依 JSON 規則跳脫。修改後執行 `docker compose up -d --force-recreate controller`；現有工作階段會立即失效。預設密碼只適合可信任區域網路中的首次設定，請儘快更換。
+帳號只能包含英文字母、數字、點、連字號和底線，最長 32 個字元。密碼中的引號和反斜線需依 JSON 規則跳脫。修改後執行 `docker compose up -d --force-recreate controller`；現有工作階段會立即失效。`.env` 含密碼，已加入 `.gitignore`，不要提交到 Git。
 
 頁面顯示「需遷移」代表仍有同名舊容器。保留資料並刪除舊容器後重新整理即可。若網頁連接埠衝突，修改 `CONTROL_PORT` 並重新建立總控。不要再將 `minecraft/compose.yaml` 部署為常駐專案，它僅供舊版參考。
 
@@ -157,3 +163,23 @@ CONTROL_ACCOUNTS_JSON={"admin":"改成高強度密碼","family":"另一個密碼
 Docker Socket 等同較高的 NAS 容器管理權限。總控雖不接受任意容器名稱、映像或命令，仍應只在可信任區域網路或 VPN 中使用。登入後簽發 12 小時暫時工作階段；HTTP 不會加密密碼和工作階段，請勿直接將 `8088` 暴露到網際網路。遠端管理應使用 Tailscale 或可信任的 HTTPS 反向代理。
 
 玩家 IP 屬於敏感資訊，詳情頁只應在可信任網路中使用。Minecraft 若設定 `ONLINE_MODE=FALSE`，玩家名稱可能被冒用，不應直接公開到網際網路。
+
+<a id="disclaimer"></a>
+## 責任說明
+
+本專案僅供家庭或校園等**可信任區域網路學習、自用**。作者不提供網際網路部署支援，也不對任何人的使用方式作擔保。
+
+將本專案或其中的遊戲伺服器部署到網際網路、用於商業營運、散布侵權內容，或違反遊戲廠商 EULA、使用者條款及當地法律法規的行為，**均由使用者自行承擔全部責任**。由此產生的任何損失、處罰或糾紛，與作者和貢獻者無關。
+
+<a id="license"></a>
+## 開源授權
+
+本倉庫由本專案撰寫的原始碼、Compose 設定和文件採用 [MIT License](LICENSE)，可自由使用、修改和再散布。
+
+以下內容**不在** MIT 授權範圍內，仍歸各權利人所有：
+
+- Minecraft、Palworld、Terraria、Project Zomboid 的遊戲、伺服器、模組和存檔（執行時由映像或 Steam 下載，請遵守對應 EULA / 使用者條款）
+- [`controller/static/assets/`](controller/static/assets/) 中的遊戲圖示，來源見 [ATTRIBUTION.md](controller/static/assets/ATTRIBUTION.md)
+- 第三方 Docker 映像（如 `itzg/minecraft-server` 與 Palworld / Terraria / Zomboid 映像），依其各自授權使用
+
+本專案與上述遊戲廠商無關，也不是它們的官方產品。請勿把 `.env`、世界存檔或含密碼的 `config/game-settings.json` 提交到 Git。

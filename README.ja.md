@@ -2,6 +2,8 @@
 
 [简体中文](README.md) | [English](README.en.md) | [繁體中文](README.zh-TW.md) | **日本語**
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 このプロジェクトはコントローラーだけを常駐させ、ゲームサーバーを必要なときだけ起動します。NAS またはプロジェクトの起動時に自動起動するのは `nas-game-controller` のみです。Minecraft とその他の登録済みゲームは、Web 画面から起動するまで停止したままです。ゲームコンテナはすべて `restart: no` を使用するため、NAS の再起動後も自動では起動しません。自動バックアップはコントローラー内部で実行され、別のバックアップコンテナは不要です。
 
 **目次**
@@ -10,6 +12,7 @@
 nas_game_server
 ├── <a href="#guide">使い方</a>
 ├── <a href="#layout">ディレクトリ構成</a>
+│   ├── <a href="LICENSE">LICENSE</a>
 │   ├── <a href="compose.yaml">compose.yaml</a>
 │   ├── <a href=".env.example">.env.example</a>
 │   ├── <a href="controller/">controller/</a>
@@ -26,14 +29,16 @@ nas_game_server
 ├── <a href="#runtime">動作仕様</a>
 ├── <a href="#details">詳細画面とプレイヤー管理</a>
 ├── <a href="#register">ゲームの追加登録</a>
-└── <a href="#security">セキュリティ</a>
+├── <a href="#security">セキュリティ</a>
+├── <a href="#disclaimer">免責事項</a>
+└── <a href="#license">ライセンス</a>
 </pre>
 
 <a id="guide"></a>
 ## 使い方
 
 1. プロジェクト一式を NAS のフォルダへコピーします。例：`/volume1/docker/nas_game_server`。
-2. そのフォルダに `.env` があることを確認します。なければ [`.env.example`](.env.example) を `.env` にコピーします。パスが `/volume1/docker/nas_game_server` でない場合は、`HOST_PROJECT_PATH` を実際のパスに変更します。
+2. [`.env.example`](.env.example) を `.env` にコピーします（`.env` はコミットしないでください）。パスが `/volume1/docker/nas_game_server` でない場合は、`HOST_PROJECT_PATH` を実際のパスに変更します。
 3. **Container Manager → プロジェクト** を開き、**作成** でコピー先フォルダを指定して **追加** します。ビルドと起動後に動くのはコントローラー `nas-game-controller` だけです。
 4. ブラウザーで `http://NASのLAN-IP:8088` を開き、管理画面に入ります。初期ユーザー名 `admin`、パスワード `admin123`。
 5. 管理画面で任意のゲームの「起動」を選びます。初回はコンテナが作成され、以降はいつでも停止・再起動できます。
@@ -43,9 +48,10 @@ nas_game_server
 
 名前をクリックすると、そのファイルまたはフォルダを開けます。`data/` や `backups/` などの実行時ディレクトリは初回起動時に自動作成され、リポジトリには含まれません。
 
+- [`LICENSE`](LICENSE) — MIT ライセンス
 - [`compose.yaml`](compose.yaml) — Web コントローラーのみを起動
-- [`.env.example`](.env.example) — 管理アカウント、NAS パス、ゲーム設定のテンプレート。`.env` にコピーして使用
-- `config/game-settings.json` — Web 画面で保存した一般設定（実行後に生成）
+- [`.env.example`](.env.example) — 管理アカウント、NAS パス、ゲーム設定のテンプレート。`.env` にコピーして記入し、`.env` はコミットしない
+- `config/game-settings.json` — Web 画面で保存した一般設定（実行後に生成。パスワードを含む）
 - [`controller/`](controller/)
   - [`Dockerfile`](controller/Dockerfile)
   - [`server.py`](controller/server.py) — Docker 制御 API と静的ファイル配信
@@ -72,7 +78,7 @@ nas_game_server
 
 古い `minecraft-neoforge` プロジェクトが動作中の場合はバックアップを作成し、ワールドが `minecraft/data` にあることを確認してから古いコンテナを停止・削除します。旧 `minecraft-backup` コンテナも削除できます。コンテナだけを削除し、データや `minecraft/data`、`mods`、`installer`、`backups` は削除しないでください。
 
-Palworld の REST 管理パスワード `PALWORLD_ADMIN_PASSWORD` も初期値は `admin123` です。Web 管理アカウントとは別の設定なので、通常利用前にそれぞれ異なる強力なパスワードへ変更してください。ゲームは UDP `8211`、Steam クエリは UDP `27015` を使用します。インターネットから接続させる場合は、ルーターと Synology ファイアウォールの両方で許可してください。REST ポート `8212` は公開されていないため、インターネットへ転送しないでください。
+Palworld の REST 管理パスワード `PALWORLD_ADMIN_PASSWORD` も初期値は `admin123` です。Web 管理アカウントとは別の設定です。ゲームは UDP `8211`、Steam クエリは UDP `27015` を使用します。インターネットから接続させる場合は、ルーターと Synology ファイアウォールの両方で許可してください。REST ポート `8212` は公開されていないため、インターネットへ転送しないでください。
 
 起動、停止、再起動はバックグラウンドで実行されます。ホーム画面の「ログ」では全ゲーム、詳細画面から開いた場合はそのゲームが最初に選択され、2 秒ごとに更新されます。初回起動が長い場合、ディレクトリ確認、イメージ取得、コンテナ作成、起動コマンドが順番に表示されます。進行中に起動を繰り返し選択しないでください。
 
@@ -103,7 +109,7 @@ CONTROL_SESSION_TTL_SECONDS=43200
 CONTROL_ACCOUNTS_JSON={"admin":"strong-password","family":"another-password","operator":"third-password"}
 ```
 
-ユーザー名には英数字、ピリオド、ハイフン、アンダースコアを使用でき、最大 32 文字です。パスワード内の引用符とバックスラッシュは JSON の規則に従ってエスケープしてください。変更後に `docker compose up -d --force-recreate controller` を実行すると、既存のセッションは直ちに無効になります。初期パスワードは信頼できる LAN での初期設定専用です。速やかに変更してください。
+ユーザー名には英数字、ピリオド、ハイフン、アンダースコアを使用でき、最大 32 文字です。パスワード内の引用符とバックスラッシュは JSON の規則に従ってエスケープしてください。変更後に `docker compose up -d --force-recreate controller` を実行すると、既存のセッションは直ちに無効になります。`.env` には秘密情報が含まれるため gitignore 済みで、コミットしないでください。
 
 画面に「移行が必要」と表示される場合、管理対象外の同名コンテナが残っています。データを保持したまま古いコンテナを削除し、画面を更新してください。Web ポートが競合する場合は `.env` の `CONTROL_PORT` を変更してコントローラーを再作成します。`minecraft/compose.yaml` は旧構成の参考用であり、常駐プロジェクトとして別途起動しないでください。
 
@@ -157,3 +163,23 @@ CONTROL_ACCOUNTS_JSON={"admin":"strong-password","family":"another-password","op
 Docker Socket へのアクセスには高いコンテナ管理権限があります。画面から任意のコンテナ名、イメージ、コマンドを入力することはできませんが、コントローラーは信頼できる LAN または VPN 内だけで使用してください。ログイン後の一時セッションは 12 時間有効です。HTTP は認証情報やセッションを暗号化しないため、`8088` をインターネットへ直接公開しないでください。リモート管理には Tailscale または信頼できる HTTPS リバースプロキシを使用してください。
 
 プレイヤーの IP アドレスは機密情報です。詳細画面は信頼できるネットワーク内だけで使用してください。Minecraft で `ONLINE_MODE=FALSE` を設定するとプレイヤー名を偽装できるため、サーバーをインターネットへ直接公開しないでください。
+
+<a id="disclaimer"></a>
+## 免責事項
+
+本プロジェクトは家庭やキャンパスなど**信頼できる LAN での学習・個人利用**を想定しています。作者はインターネット公開の導入をサポートせず、利用方法について保証しません。
+
+本プロジェクトやゲームサーバーをインターネットへ公開したり、商用利用したり、侵害コンテンツを配布したり、ゲームパブリッシャーの EULA・利用規約や現地法令に違反したりした場合、**その責任はすべて利用者にあります**。それによって生じた損失、処分、紛争について、作者および貢献者は責任を負いません。
+
+<a id="license"></a>
+## ライセンス
+
+本リポジトリのうち、本プロジェクトが作成したソースコード、Compose 設定、ドキュメントは [MIT License](LICENSE) です。自由に利用、改変、再配布できます。
+
+次のものは MIT の対象外で、各権利者に帰属します。
+
+- Minecraft、Palworld、Terraria、Project Zomboid のゲーム本体、専用サーバー、Mod、セーブ（実行時にイメージまたは Steam から取得。各 EULA / 利用規約に従ってください）
+- [`controller/static/assets/`](controller/static/assets/) のゲームアイコン。出典は [ATTRIBUTION.md](controller/static/assets/ATTRIBUTION.md)
+- 第三者の Docker イメージ（`itzg/minecraft-server` や Palworld / Terraria / Zomboid など）。各イメージ自身のライセンスに従います
+
+本プロジェクトはこれらのパブリッシャー公式製品ではなく、提携・後援もありません。`.env`、ワールドセーブ、パスワードを含む `config/game-settings.json` は Git にコミットしないでください。
