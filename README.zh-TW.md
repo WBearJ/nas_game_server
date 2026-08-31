@@ -11,6 +11,7 @@
 <pre>
 nas_game_server
 ├── <a href="#guide">使用教學</a>
+├── <a href="#resources">資源占用</a>
 ├── <a href="#layout">目錄結構</a>
 │   ├── <a href="LICENSE">LICENSE</a>
 │   ├── <a href="compose.yaml">compose.yaml</a>
@@ -38,10 +39,24 @@ nas_game_server
 ## 使用教學
 
 1. 把整個專案複製到 NAS 的一個資料夾，例如 `/volume1/docker/nas_game_server`。
-2. 把 [`.env.example`](.env.example) 複製為 `.env`（不要提交 `.env`）。路徑如果不是 `/volume1/docker/nas_game_server`，把其中的 `HOST_PROJECT_PATH` 改成實際路徑。
+2. 把 [`.env.example`](.env.example) 複製為 `.env`。路徑如果不是 `/volume1/docker/nas_game_server`，把其中的 `HOST_PROJECT_PATH` 改成實際路徑。
 3. 開啟 Synology **Container Manager → 專案**，點 **新增**，路徑選剛複製的專案資料夾，再點 **加入**。建置並啟動後，只會運行總控 `nas-game-controller`。
 4. 瀏覽器開啟 `http://NAS的區域網路IP:8088` 進入管理頁。預設帳號 `admin`，預設密碼 `admin123`。
 5. 在管理頁點選某個遊戲的「啟動」。第一次會建立對應容器，之後可隨時停止或再啟動。
+
+<a id="resources"></a>
+## 資源占用
+
+家庭區域網路實測大約如下。`.env` 裡的 `MEMORY=14G`、`PZ_MAX_RAM=6G` 是上限，不是平時實際占用。
+
+| 遊戲 | 實際記憶體 | 說明 |
+| --- | --- | --- |
+| Minecraft Java（NeoForge） | 約 2–4 GB | 隨模組和線上人數上升 |
+| Palworld | 約 2 GB | 玩家和建築增多後會再漲 |
+| Terraria（TShock） | 約 400 MB | 最輕 |
+| Project Zomboid | 預設 Java 堆上限 6 GB | 首次啟動還會下載伺服器 |
+
+20 GB 記憶體的 NAS 可以同時開 Minecraft、Palworld 和 Terraria。再加上 Project Zomboid 時注意總占用，避免 DSM 開始使用交換空間。
 
 <a id="layout"></a>
 ## 目錄結構
@@ -50,8 +65,8 @@ nas_game_server
 
 - [`LICENSE`](LICENSE) — MIT 開源授權
 - [`compose.yaml`](compose.yaml) — 只啟動網頁總控
-- [`.env.example`](.env.example) — 管理帳號、NAS 路徑和遊戲參數範本，複製為 `.env` 後填寫；`.env` 不要提交
-- `config/game-settings.json` — 網頁儲存的常用設定（執行後產生，含密碼，不要公開）
+- [`.env.example`](.env.example) — 管理帳號、NAS 路徑和遊戲參數範本，複製為 `.env` 後填寫
+- `config/game-settings.json` — 網頁儲存的常用設定（執行後產生）
 - [`controller/`](controller/)
   - [`Dockerfile`](controller/Dockerfile)
   - [`server.py`](controller/server.py) — Docker 控制 API 與靜態檔案服務
@@ -109,7 +124,7 @@ CONTROL_SESSION_TTL_SECONDS=43200
 CONTROL_ACCOUNTS_JSON={"admin":"改成高強度密碼","family":"另一個密碼","operator":"第三個密碼"}
 ```
 
-帳號只能包含英文字母、數字、點、連字號和底線，最長 32 個字元。密碼中的引號和反斜線需依 JSON 規則跳脫。修改後執行 `docker compose up -d --force-recreate controller`；現有工作階段會立即失效。`.env` 含密碼，已加入 `.gitignore`，不要提交到 Git。
+帳號只能包含英文字母、數字、點、連字號和底線，最長 32 個字元。密碼中的引號和反斜線需依 JSON 規則跳脫。修改後執行 `docker compose up -d --force-recreate controller`；現有工作階段會立即失效。
 
 頁面顯示「需遷移」代表仍有同名舊容器。保留資料並刪除舊容器後重新整理即可。若網頁連接埠衝突，修改 `CONTROL_PORT` 並重新建立總控。不要再將 `minecraft/compose.yaml` 部署為常駐專案，它僅供舊版參考。
 
@@ -136,7 +151,7 @@ CONTROL_ACCOUNTS_JSON={"admin":"改成高強度密碼","family":"另一個密碼
 - Palworld 支援伺服器資訊、世界狀態、玩家資訊、踢出、封鎖、公告、儲存和備份。
 - Terraria 使用 TShock，遊戲連接埠為 TCP `7777`；管理連接埠 `7878` 只綁定 NAS 本機，請勿轉送。
 - Project Zomboid 使用 Build 42 與 RCON。網際網路連線需放行 UDP `16261`–`16263`；RCON TCP `27016` 只綁定 NAS 本機。
-- Palworld 與 Project Zomboid 需要較多記憶體。20 GB NAS 建議按需單獨運行大型伺服器，避免同時啟動 Minecraft、Palworld 和 Project Zomboid。
+- 各遊戲記憶體占用見上文「資源占用」。網頁遊戲卡片也會顯示即時 CPU、記憶體和目錄大小。
 
 <a id="register"></a>
 ## 註冊其他遊戲
@@ -182,4 +197,4 @@ Docker Socket 等同較高的 NAS 容器管理權限。總控雖不接受任意�
 - [`controller/static/assets/`](controller/static/assets/) 中的遊戲圖示，來源見 [ATTRIBUTION.md](controller/static/assets/ATTRIBUTION.md)
 - 第三方 Docker 映像（如 `itzg/minecraft-server` 與 Palworld / Terraria / Zomboid 映像），依其各自授權使用
 
-本專案與上述遊戲廠商無關，也不是它們的官方產品。請勿把 `.env`、世界存檔或含密碼的 `config/game-settings.json` 提交到 Git。
+本專案與上述遊戲廠商無關，也不是它們的官方產品。

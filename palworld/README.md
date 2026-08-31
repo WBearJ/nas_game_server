@@ -9,4 +9,4 @@
 
 根目录 `.env` 中的 `PALWORLD_ADMIN_PASSWORD` 默认是 `admin123`，首次部署可以直接启动。更新服务器名称、密码、人数或倍率后，需要重新创建 `palworld-server` 容器才能把新环境变量应用到容器；数据目录不会因此删除。
 
-帕鲁服务端占用内存较高。当前 NAS 总内存为 20 GB 时，不建议同时运行 Minecraft 与幻兽帕鲁；请在网页中先停止一个，再启动另一个。
+帕鲁服务端实测大约占用 2 GB 内存，玩家和建筑增多后会再涨。可以与 Minecraft、Terraria 同时运行；再加上 Project Zomboid 时注意 NAS 总内存。

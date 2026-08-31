@@ -11,6 +11,7 @@
 <pre>
 nas_game_server
 ├── <a href="#guide">使い方</a>
+├── <a href="#resources">リソース</a>
 ├── <a href="#layout">ディレクトリ構成</a>
 │   ├── <a href="LICENSE">LICENSE</a>
 │   ├── <a href="compose.yaml">compose.yaml</a>
@@ -38,10 +39,24 @@ nas_game_server
 ## 使い方
 
 1. プロジェクト一式を NAS のフォルダへコピーします。例：`/volume1/docker/nas_game_server`。
-2. [`.env.example`](.env.example) を `.env` にコピーします（`.env` はコミットしないでください）。パスが `/volume1/docker/nas_game_server` でない場合は、`HOST_PROJECT_PATH` を実際のパスに変更します。
+2. [`.env.example`](.env.example) を `.env` にコピーします。パスが `/volume1/docker/nas_game_server` でない場合は、`HOST_PROJECT_PATH` を実際のパスに変更します。
 3. **Container Manager → プロジェクト** を開き、**作成** でコピー先フォルダを指定して **追加** します。ビルドと起動後に動くのはコントローラー `nas-game-controller` だけです。
 4. ブラウザーで `http://NASのLAN-IP:8088` を開き、管理画面に入ります。初期ユーザー名 `admin`、パスワード `admin123`。
 5. 管理画面で任意のゲームの「起動」を選びます。初回はコンテナが作成され、以降はいつでも停止・再起動できます。
+
+<a id="resources"></a>
+## リソース
+
+家庭 LAN での実測です。`.env` の `MEMORY=14G` と `PZ_MAX_RAM=6G` は上限であり、平時の使用量ではありません。
+
+| ゲーム | 実行時メモリ | 説明 |
+| --- | --- | --- |
+| Minecraft Java（NeoForge） | 約 2–4 GB | Mod と人数で増加 |
+| Palworld | 約 2 GB | 人数と建築量で増加 |
+| Terraria（TShock） | 約 400 MB | 最も軽い |
+| Project Zomboid | 既定の Java ヒープ上限 6 GB | 初回起動時にサーバー本体もダウンロード |
+
+20 GB の NAS なら Minecraft、Palworld、Terraria を同時に動かせます。Project Zomboid も足す場合は合計メモリに注意し、DSM がスワップを使い始めないようにしてください。
 
 <a id="layout"></a>
 ## ディレクトリ構成
@@ -50,8 +65,8 @@ nas_game_server
 
 - [`LICENSE`](LICENSE) — MIT ライセンス
 - [`compose.yaml`](compose.yaml) — Web コントローラーのみを起動
-- [`.env.example`](.env.example) — 管理アカウント、NAS パス、ゲーム設定のテンプレート。`.env` にコピーして記入し、`.env` はコミットしない
-- `config/game-settings.json` — Web 画面で保存した一般設定（実行後に生成。パスワードを含む）
+- [`.env.example`](.env.example) — 管理アカウント、NAS パス、ゲーム設定のテンプレート。`.env` にコピーして使用
+- `config/game-settings.json` — Web 画面で保存した一般設定（実行後に生成）
 - [`controller/`](controller/)
   - [`Dockerfile`](controller/Dockerfile)
   - [`server.py`](controller/server.py) — Docker 制御 API と静的ファイル配信
@@ -109,7 +124,7 @@ CONTROL_SESSION_TTL_SECONDS=43200
 CONTROL_ACCOUNTS_JSON={"admin":"strong-password","family":"another-password","operator":"third-password"}
 ```
 
-ユーザー名には英数字、ピリオド、ハイフン、アンダースコアを使用でき、最大 32 文字です。パスワード内の引用符とバックスラッシュは JSON の規則に従ってエスケープしてください。変更後に `docker compose up -d --force-recreate controller` を実行すると、既存のセッションは直ちに無効になります。`.env` には秘密情報が含まれるため gitignore 済みで、コミットしないでください。
+ユーザー名には英数字、ピリオド、ハイフン、アンダースコアを使用でき、最大 32 文字です。パスワード内の引用符とバックスラッシュは JSON の規則に従ってエスケープしてください。変更後に `docker compose up -d --force-recreate controller` を実行すると、既存のセッションは直ちに無効になります。
 
 画面に「移行が必要」と表示される場合、管理対象外の同名コンテナが残っています。データを保持したまま古いコンテナを削除し、画面を更新してください。Web ポートが競合する場合は `.env` の `CONTROL_PORT` を変更してコントローラーを再作成します。`minecraft/compose.yaml` は旧構成の参考用であり、常駐プロジェクトとして別途起動しないでください。
 
@@ -136,7 +151,7 @@ CONTROL_ACCOUNTS_JSON={"admin":"strong-password","family":"another-password","op
 - Palworld はサーバー・ワールド情報、プレイヤー情報、キック、BAN、通知、保存、バックアップに対応します。
 - Terraria は TShock を使用します。ゲームポートは TCP `7777`、管理ポート `7878` は NAS ローカル専用で、外部へ転送しないでください。
 - Project Zomboid は Build 42 と RCON を使用します。外部接続には UDP `16261`–`16263` が必要で、RCON TCP `27016` は NAS ローカル専用です。
-- Palworld と Project Zomboid は多くのメモリを使用します。20 GB の NAS では大型サーバーを必要なときだけ個別に実行し、Minecraft、Palworld、Project Zomboid の同時実行は避けてください。
+- メモリの目安は上記「リソース」を参照してください。ゲームカードにも CPU、メモリ、ディレクトリサイズがリアルタイム表示されます。
 
 <a id="register"></a>
 ## ゲームの追加登録
@@ -182,4 +197,4 @@ Docker Socket へのアクセスには高いコンテナ管理権限がありま
 - [`controller/static/assets/`](controller/static/assets/) のゲームアイコン。出典は [ATTRIBUTION.md](controller/static/assets/ATTRIBUTION.md)
 - 第三者の Docker イメージ（`itzg/minecraft-server` や Palworld / Terraria / Zomboid など）。各イメージ自身のライセンスに従います
 
-本プロジェクトはこれらのパブリッシャー公式製品ではなく、提携・後援もありません。`.env`、ワールドセーブ、パスワードを含む `config/game-settings.json` は Git にコミットしないでください。
+本プロジェクトはこれらのパブリッシャー公式製品ではなく、提携・後援もありません。

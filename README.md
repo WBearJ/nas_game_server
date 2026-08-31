@@ -11,6 +11,7 @@
 <pre>
 nas_game_server
 ├── <a href="#guide">使用教程</a>
+├── <a href="#resources">资源占用</a>
 ├── <a href="#layout">目录结构</a>
 │   ├── <a href="LICENSE">LICENSE</a>
 │   ├── <a href="compose.yaml">compose.yaml</a>
@@ -38,10 +39,24 @@ nas_game_server
 ## 使用教程
 
 1. 把整个项目复制到 NAS 的一个文件夹，例如 `/volume1/docker/nas_game_server`。
-2. 把 [`.env.example`](.env.example) 复制为 `.env`（不要提交 `.env`）。路径如果不是 `/volume1/docker/nas_game_server`，把其中的 `HOST_PROJECT_PATH` 改成实际路径。
+2. 把 [`.env.example`](.env.example) 复制为 `.env`。路径如果不是 `/volume1/docker/nas_game_server`，把其中的 `HOST_PROJECT_PATH` 改成实际路径。
 3. 打开群晖 **Container Manager → 项目**，点 **新增**，路径选刚复制的项目文件夹，再点 **添加**。构建并启动后，只会运行总控 `nas-game-controller`。
 4. 浏览器打开 `http://NAS的局域网IP:8088` 进入管理页。默认账号 `admin`，默认密码 `admin123`。
 5. 在管理页点击某个游戏的「启动」。第一次会创建对应容器，之后可随时停止或再启动。
+
+<a id="resources"></a>
+## 资源占用
+
+家庭局域网实测大约如下。`.env` 里的 `MEMORY=14G`、`PZ_MAX_RAM=6G` 是上限，不是平时实际占用。
+
+| 游戏 | 实际内存 | 说明 |
+| --- | --- | --- |
+| Minecraft Java（NeoForge） | 约 2–4 GB | 随模组和在线人数上升 |
+| 幻兽帕鲁 | 约 2 GB | 玩家和建筑增多后会再涨 |
+| Terraria（TShock） | 约 400 MB | 最轻 |
+| Project Zomboid | 默认 Java 堆上限 6 GB | 首次启动还会下载服务端 |
+
+20 GB 内存的 NAS 可以同时开 Minecraft、幻兽帕鲁和 Terraria。再加上 Project Zomboid 时注意总占用，避免 DSM 开始使用交换分区。
 
 <a id="layout"></a>
 ## 目录结构
@@ -50,8 +65,8 @@ nas_game_server
 
 - [`LICENSE`](LICENSE) — MIT 开源协议
 - [`compose.yaml`](compose.yaml) — 只启动网页总控
-- [`.env.example`](.env.example) — 管理账号、NAS 路径和游戏参数模板，复制为 `.env` 后填写；`.env` 不要提交
-- `config/game-settings.json` — 网页保存的游戏常用配置（运行后生成，含密码，不要公开）
+- [`.env.example`](.env.example) — 管理账号、NAS 路径和游戏参数模板，复制为 `.env` 后填写
+- `config/game-settings.json` — 网页保存的游戏常用配置（运行后生成）
 - [`controller/`](controller/)
   - [`Dockerfile`](controller/Dockerfile)
   - [`server.py`](controller/server.py) — Docker 控制 API 与静态文件服务
@@ -111,7 +126,7 @@ CONTROL_SESSION_TTL_SECONDS=43200
 CONTROL_ACCOUNTS_JSON={"admin":"换成高强度密码","family":"另一个密码","operator":"第三个密码"}
 ```
 
-账号只能使用英文字母、数字、点、横线和下划线，最长32个字符。密码写在 JSON 字符串中，若包含双引号或反斜杠，需要按 JSON 规则转义。修改账号后执行 `docker compose up -d --force-recreate controller`；已有网页会话会立即失效，需要重新登录。`.env` 含密码，已加入 `.gitignore`，不要提交到 Git。
+账号只能使用英文字母、数字、点、横线和下划线，最长32个字符。密码写在 JSON 字符串中，若包含双引号或反斜杠，需要按 JSON 规则转义。修改账号后执行 `docker compose up -d --force-recreate controller`；已有网页会话会立即失效，需要重新登录。
 
 如果页面显示“需迁移”，说明仍存在同名旧容器。删除旧容器并保留数据后刷新页面即可；总控不会擅自接管或删除非本项目创建的容器。
 
@@ -141,8 +156,7 @@ CONTROL_ACCOUNTS_JSON={"admin":"换成高强度密码","family":"另一个密码
 - 幻兽帕鲁支持网页发送服务器公告、立即保存、手动备份、启动、停止、重启与日志查看。服务端更新由容器在启动时自动检查。
 - Terraria 使用 TShock 稳定版镜像，详情页支持在线玩家、IP、TShock 账号组、踢出、封禁、服务器公告、保存世界和备份。默认游戏端口为 TCP `7777`；管理端口 `7878` 只绑定 NAS 本机，不要转发到公网。
 - Project Zomboid 使用 Build 42 自动更新镜像，详情页支持 RCON 在线玩家、踢出、封禁、公告、保存、备份以及 Workshop ID/Mod ID 配置。公网连接需要放行 UDP `16261`–`16263`；RCON TCP `27016` 只绑定 NAS 本机，不要转发到公网。
-- 幻兽帕鲁服务端通常需要较多内存。20 GB 总内存的 NAS 不建议同时运行 Minecraft 与幻兽帕鲁，以免系统开始交换内存或杀死容器。
-- Project Zomboid 默认分配 6 GB Java 内存，首次启动还会下载服务端文件。20 GB NAS 上建议大型游戏服务器按需单独运行，不要同时启动 Minecraft、幻兽帕鲁和 Project Zomboid。
+- 各游戏内存占用见上文「资源占用」。网页游戏卡片也会显示实时 CPU、内存和目录大小。
 
 <a id="register"></a>
 ## 注册其他游戏
@@ -200,4 +214,4 @@ Docker Socket 等同于较高的 NAS 容器管理权限。本项目没有提供�
 - [`controller/static/assets/`](controller/static/assets/) 中的游戏图标，来源见 [ATTRIBUTION.md](controller/static/assets/ATTRIBUTION.md)
 - 第三方 Docker 镜像（如 `itzg/minecraft-server`、帕鲁 / Terraria / Zomboid 镜像），按其各自协议使用
 
-本项目与上述游戏厂商无关，也不是它们的官方产品。请勿把 `.env`、世界存档或含密码的 `config/game-settings.json` 提交到 Git。
+本项目与上述游戏厂商无关，也不是它们的官方产品。

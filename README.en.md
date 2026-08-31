@@ -11,6 +11,7 @@ This project keeps only the controller running and starts game servers on demand
 <pre>
 nas_game_server
 ├── <a href="#guide">Quick start</a>
+├── <a href="#resources">Resource use</a>
 ├── <a href="#layout">Project layout</a>
 │   ├── <a href="LICENSE">LICENSE</a>
 │   ├── <a href="compose.yaml">compose.yaml</a>
@@ -38,10 +39,24 @@ nas_game_server
 ## Quick start
 
 1. Copy the whole project into a folder on the NAS, for example `/volume1/docker/nas_game_server`.
-2. Copy [`.env.example`](.env.example) to `.env` (never commit `.env`). If the path is not `/volume1/docker/nas_game_server`, also set `HOST_PROJECT_PATH`.
+2. Copy [`.env.example`](.env.example) to `.env`. If the path is not `/volume1/docker/nas_game_server`, also set `HOST_PROJECT_PATH`.
 3. Open **Container Manager → Project**, choose **Create**, set the path to that folder, then **Add**. After build and start, only `nas-game-controller` should run.
 4. Open `http://NAS-LAN-IP:8088` in a browser. Default username `admin`, password `admin123`.
 5. Select **Start** on a game. The first start creates its containers; later you can stop or start it again at any time.
+
+<a id="resources"></a>
+## Resource use
+
+Figures below are from a home LAN. `MEMORY=14G` and `PZ_MAX_RAM=6G` in `.env` are ceilings, not typical use.
+
+| Game | RAM in use | Notes |
+| --- | --- | --- |
+| Minecraft Java (NeoForge) | About 2–4 GB | Grows with mods and player count |
+| Palworld | About 2 GB | Grows with players and bases |
+| Terraria (TShock) | About 400 MB | Lightest |
+| Project Zomboid | 6 GB Java heap cap by default | Also downloads server files on first start |
+
+A 20 GB NAS can run Minecraft, Palworld, and Terraria together. Watch total use if you also start Project Zomboid, so DSM does not start swapping.
 
 <a id="layout"></a>
 ## Project layout
@@ -50,8 +65,8 @@ Click a name to open that file or folder. Runtime directories such as `data/` an
 
 - [`LICENSE`](LICENSE) — MIT license
 - [`compose.yaml`](compose.yaml) — Starts only the web controller
-- [`.env.example`](.env.example) — Template for admin accounts, NAS paths, and game options; copy to `.env` and fill in. Do not commit `.env`
-- `config/game-settings.json` — Common settings saved from the web UI (created at runtime; may contain passwords)
+- [`.env.example`](.env.example) — Template for admin accounts, NAS paths, and game options; copy to `.env`
+- `config/game-settings.json` — Common settings saved from the web UI (created at runtime)
 - [`controller/`](controller/)
   - [`Dockerfile`](controller/Dockerfile)
   - [`server.py`](controller/server.py) — Docker control API and static file server
@@ -109,7 +124,7 @@ Multiple accounts are supported:
 CONTROL_ACCOUNTS_JSON={"admin":"use-a-strong-password","family":"another-password","operator":"third-password"}
 ```
 
-Usernames may contain letters, numbers, dots, hyphens, and underscores and are limited to 32 characters. Escape quotes and backslashes in passwords according to JSON rules. After changing accounts, run `docker compose up -d --force-recreate controller`. Existing sessions become invalid immediately. `.env` contains secrets and is gitignored; never commit it.
+Usernames may contain letters, numbers, dots, hyphens, and underscores and are limited to 32 characters. Escape quotes and backslashes in passwords according to JSON rules. After changing accounts, run `docker compose up -d --force-recreate controller`. Existing sessions become invalid immediately.
 
 “Migration required” means an unmanaged old container has the same name. Remove that container while keeping its data, then refresh. If the web port conflicts, change `CONTROL_PORT` in `.env` and recreate the controller. Do not deploy `minecraft/compose.yaml` as another permanent project; it remains only as a legacy reference.
 
@@ -136,7 +151,7 @@ Usernames may contain letters, numbers, dots, hyphens, and underscores and are l
 - Palworld details show server version, world GUID, FPS, frame time, world days, settings, and player account/IP/level/ping/building/location data. Players may be kicked or banned.
 - Terraria uses a stable TShock image and supports players, IPs, account groups, kick, ban, announcements, saves, and backups. Game port TCP `7777` may be published; management port `7878` is bound only to the NAS and must not be forwarded.
 - Project Zomboid uses an automatically updated Build 42 image and supports RCON players, kick, ban, announcements, saves, backups, and Workshop/Mod IDs. Internet play needs UDP `16261`–`16263`; RCON TCP `27016` is NAS-local only.
-- Palworld and Project Zomboid require substantial memory. On a 20 GB NAS, run large servers on demand and avoid running Minecraft, Palworld, and Project Zomboid simultaneously.
+- See **Resource use** for typical RAM. Game cards also show live CPU, memory, and directory size.
 
 <a id="register"></a>
 ## Register another game
@@ -192,4 +207,4 @@ The following are **not** covered by that license and remain the property of the
 - Game icons in [`controller/static/assets/`](controller/static/assets/); see [ATTRIBUTION.md](controller/static/assets/ATTRIBUTION.md)
 - Third-party Docker images (such as `itzg/minecraft-server` and the Palworld / Terraria / Zomboid images), which follow their own licenses
 
-This project is independent and is not affiliated with or endorsed by those publishers. Do not commit `.env`, world saves, or `config/game-settings.json` (it may contain passwords).
+This project is independent and is not affiliated with or endorsed by those publishers.
