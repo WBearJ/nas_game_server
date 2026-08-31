@@ -124,6 +124,29 @@ class ControllerTests(unittest.TestCase):
             store.write_text('{"games":["unknown-game"]}\n', encoding="utf-8")
             self.assertEqual(SERVER.read_added_game_ids(), [])
 
+    def test_available_library_games_excludes_added_games(self):
+        with tempfile.TemporaryDirectory() as directory:
+            SERVER.HOST_PROJECT_MOUNT = Path(directory)
+            SERVER.persist_added_game_ids(["minecraft", "palworld"])
+            self.assertEqual(
+                [game["id"] for game in SERVER.available_library_games()],
+                [game["id"] for game in SERVER.GAMES if game["id"] not in {"minecraft", "palworld"}]
+            )
+
+    def test_added_game_cannot_be_initialized_again(self):
+        with tempfile.TemporaryDirectory() as directory:
+            SERVER.HOST_PROJECT_MOUNT = Path(directory)
+            SERVER.persist_added_game_ids(["terraria"])
+            game = next(item for item in SERVER.GAMES if item["id"] == "terraria")
+            with self.assertRaises(SERVER.DockerError) as context:
+                SERVER.ensure_game_not_added(game)
+            self.assertEqual(context.exception.status, 409)
+
+    def test_every_game_supports_initial_setup(self):
+        for game in SERVER.GAMES:
+            self.assertTrue(game.get("setup"), game["id"])
+            self.assertTrue(game.get("settings"), game["id"])
+
     def test_docker_stream_decode(self):
         payload = (
             b"\x01\x00\x00\x00\x00\x00\x00\x05hello"

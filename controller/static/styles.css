@@ -1937,6 +1937,16 @@ button:disabled {
   font-size: 13px;
 }
 
+.catalog-empty {
+  grid-column: 1 / -1;
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 24px;
+  background: linear-gradient(145deg, rgba(93, 52, 208, 0.14), rgba(0, 240, 255, 0.045));
+}
+
 .player-note {
   padding: 8px 4px 0;
 }

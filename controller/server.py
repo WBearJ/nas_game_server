@@ -637,6 +637,16 @@ def added_games():
     return [game for game in GAMES if game["id"] in added]
 
 
+def available_library_games():
+    added = set(read_added_game_ids())
+    return [game for game in GAMES if game["id"] not in added]
+
+
+def ensure_game_not_added(game):
+    if game["id"] in set(read_added_game_ids()):
+        raise DockerError(409, "游戏已经添加，无需再次初始化")
+
+
 def read_settings_store():
     path = settings_store_path()
     if not path.is_file():
@@ -2838,7 +2848,6 @@ class Handler(BaseHTTPRequestHandler):
             if not self.require_auth():
                 return
             try:
-                added = set(read_added_game_ids())
                 games = [{
                     "id": game["id"],
                     "name": game["name"],
@@ -2849,8 +2858,8 @@ class Handler(BaseHTTPRequestHandler):
                     "endpoint": game.get("endpoint", ""),
                     "setup": bool(game.get("setup")),
                     "supportsMods": bool(game.get("supportsMods", game.get("id") == "minecraft")),
-                    "added": game["id"] in added
-                } for game in GAMES]
+                    "added": False
+                } for game in available_library_games()]
                 self.json_response(200, {"games": games})
             except RuntimeError as exc:
                 self.json_response(500, {"error": str(exc)})
@@ -2864,13 +2873,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_response(404, {"error": "游戏未注册"})
                 return
             try:
-                payload = {"gameId": game["id"], "settings": settings_info(game)}
+                ensure_game_not_added(game)
+                payload = {
+                    "gameId": game["id"],
+                    "settings": settings_info(game),
+                    "supportsMods": game.get("id") == "minecraft"
+                }
                 if game.get("id") == "minecraft":
                     payload["runtime"] = minecraft_catalog()
-                    payload["supportsMods"] = MINECRAFT_LOADERS.get(
-                        current_minecraft_loader(game),
-                        MINECRAFT_LOADERS["neoforge"]
-                    )["mods"]
                 self.json_response(200, payload)
             except (DockerError, RuntimeError) as exc:
                 self.json_response(getattr(exc, "status", 500), {"error": str(exc)})
@@ -2943,6 +2953,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_response(404, {"error": "游戏未注册"})
                 return
             try:
+                ensure_game_not_added(game)
                 payload = self.read_optional_json_body()
                 if payload.get("settings"):
                     persist_settings(game, validate_settings(game, payload.get("settings")))

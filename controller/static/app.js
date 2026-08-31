@@ -504,7 +504,12 @@ function renderCatalogGame(game) {
 }
 
 function renderCatalog(payload) {
-  catalogGrid.replaceChildren(...(payload.games || []).map(renderCatalogGame));
+  const games = (payload.games || []).filter((game) => !game.added);
+  if (!games.length) {
+    catalogGrid.replaceChildren(createElement("p", "empty-state catalog-empty", "所有可用游戏都已添加。"));
+    return;
+  }
+  catalogGrid.replaceChildren(...games.map(renderCatalogGame));
 }
 
 async function loadCatalog() {
@@ -785,12 +790,19 @@ async function uploadModFiles(gameId, files, title = "正在上传 Mod") {
 }
 
 function renderGameSetup(game, payload) {
+  const isMinecraft = game.id === "minecraft";
   const form = createElement("form", "setup-form glass-panel");
   const heading = createElement("div", "setup-heading");
   heading.append(
     createElement("p", "eyebrow", "初始化"),
     createElement("h2", "", `配置 ${game.name}`),
-    createElement("p", "section-description", "先选择加载器和游戏版本，并可同时设置常用配置、上传 Mod。")
+    createElement(
+      "p",
+      "section-description",
+      isMinecraft
+        ? "先选择加载器和游戏版本，并可同时设置常用配置、上传 Mod。"
+        : "首次启动前完成常用配置；添加后仍可在详情页调整可修改项。"
+    )
   );
   const fields = createElement("div", "settings-grid");
   for (const setting of payload.settings || []) fields.append(renderSettingField(setting));
@@ -861,7 +873,9 @@ function renderGameSetup(game, payload) {
       });
       let uploaded = 0;
       const loader = settings.loader || "neoforge";
-      const allowMods = payload.runtime?.loaders?.find((item) => item.id === loader)?.mods !== false && loader !== "vanilla";
+      const allowMods = Boolean(payload.supportsMods)
+        && payload.runtime?.loaders?.find((item) => item.id === loader)?.mods !== false
+        && loader !== "vanilla";
       if (allowMods && pending.length) {
         uploadTitle.textContent = tt("正在上传 Mod");
         uploaded = (await startModUploads(game.id, pending, rows)).uploaded;
@@ -882,7 +896,9 @@ function renderGameSetup(game, payload) {
       }
     }
   });
-  form.append(heading, fields, mods, actions);
+  form.append(heading, fields);
+  if (payload.supportsMods) form.append(mods);
+  form.append(actions);
   addGameSetup.replaceChildren(form);
   bindMinecraftRuntimeFields(form, payload.runtime);
 }

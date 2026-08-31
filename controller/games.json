@@ -100,6 +100,7 @@
     {
       "id": "palworld",
       "name": "幻兽帕鲁",
+      "setup": true,
       "description": "Palworld 专用服务器",
       "icon": "/assets/palworld.png",
       "version": "自动更新",
@@ -192,6 +193,7 @@
     {
       "id": "terraria",
       "name": "Terraria",
+      "setup": true,
       "description": "TShock 管理服务器",
       "icon": "/assets/terraria.png",
       "version": "自动更新",
@@ -272,6 +274,7 @@
     {
       "id": "zomboid",
       "name": "Project Zomboid",
+      "setup": true,
       "description": "Build 42 生存服务器",
       "icon": "/assets/project-zomboid.png",
       "version": "Build 42 · 自动更新",
