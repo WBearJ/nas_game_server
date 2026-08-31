@@ -1,0 +1,5 @@
+data/
+mods/*.jar
+.env
+backups/
+

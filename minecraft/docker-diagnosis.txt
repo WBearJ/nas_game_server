@@ -1,0 +1,12 @@
+=== PORT BINDING ===
+{}
+=== RUNNING CONTAINERS ===
+NAMES                  STATUS                       PORTS
+minecraft-neoforge     Up 3 hours (healthy)         
+gitlab_runner_docker   Up 3 days                    
+gitlab-ce              Exited (255) 12 months ago   0.0.0.0:32769->22/tcp, :::32769->22/tcp, 0.0.0.0:8000->80/tcp, :::8000->80/tcp, 0.0.0.0:32768->443/tcp, :::32768->443/tcp
+stilleshan-frpc-1      Exited (255) 12 months ago   
+=== PORT 25565/25566 ===
+tcp6       0      0 :::25566                :::*                    LISTEN      10546/java          
+=== START ERROR ===
+minecraft-neoforge

@@ -1,0 +1,52 @@
+services:
+  minecraft:
+    image: "${MC_IMAGE:-itzg/minecraft-server:stable-java25}"
+    container_name: minecraft-neoforge
+    restart: unless-stopped
+    init: true
+    tty: true
+    stdin_open: true
+    stop_grace_period: 2m
+    # Synology's bridge/NAT port publishing is failing on this NAS, so use
+    # host networking and let Minecraft bind directly to MC_GAME_PORT.
+    network_mode: host
+    environment:
+      EULA: "${EULA:-TRUE}"
+      TYPE: "${TYPE:-NEOFORGE}"
+      VERSION: "${VERSION:-26.2}"
+      NEOFORGE_VERSION: "${NEOFORGE_VERSION:-26.2.0.62}"
+      NEOFORGE_INSTALLER: "${NEOFORGE_INSTALLER:-/installer/neoforge-26.2.0.62-installer.jar}"
+      MEMORY: "${MEMORY:-14G}"
+      # Use a project-specific variable name. Synology can inject SERVER_PORT=5001,
+      # which would otherwise make Minecraft collide with DSM's HTTPS port.
+      SERVER_PORT: "${MC_GAME_PORT:-25566}"
+      OVERRIDE_SERVER_PROPERTIES: "TRUE"
+      PROXY: "${PROXY:-}"
+      TZ: "${TZ:-Asia/Shanghai}"
+      UID: "${PUID:-1000}"
+      GID: "${PGID:-1000}"
+      MOTD: "${MOTD:-Synology NeoForge 26.2 Server}"
+      MAX_PLAYERS: "${MAX_PLAYERS:-10}"
+      DIFFICULTY: "${DIFFICULTY:-normal}"
+      VIEW_DISTANCE: "${VIEW_DISTANCE:-10}"
+      SIMULATION_DISTANCE: "${SIMULATION_DISTANCE:-8}"
+      ENABLE_WHITELIST: "${ENABLE_WHITELIST:-FALSE}"
+      WHITELIST: "${WHITELIST:-}"
+      OPS: "${OPS:-}"
+      ONLINE_MODE: "${ONLINE_MODE:-TRUE}"
+      ENFORCE_SECURE_PROFILE: "${ENFORCE_SECURE_PROFILE:-TRUE}"
+      # Host networking would expose RCON directly, so keep it disabled.
+      ENABLE_RCON: "FALSE"
+      CREATE_CONSOLE_IN_PIPE: "true"
+      REMOVE_OLD_MODS: "TRUE"
+      ENABLE_ROLLING_LOGS: "TRUE"
+    volumes:
+      - ./data:/data
+      - ./mods:/mods:ro
+      - ./installer:/installer:ro
+    healthcheck:
+      test: ["CMD", "mc-health"]
+      start_period: 5m
+      interval: 30s
+      timeout: 10s
+      retries: 5

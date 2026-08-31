@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>游戏服务器总控</title>
+    <link rel="icon" href="./assets/minecraft-java.png" type="image/png">
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="aurora aurora-one" aria-hidden="true"></div>
+    <div class="aurora aurora-two" aria-hidden="true"></div>
+    <div class="aurora aurora-three" aria-hidden="true"></div>
+    <main>
+      <section id="loginView" class="login-view">
+        <label class="language-picker login-language-picker">
+          <span data-i18n="语言">语言</span>
+          <select class="language-select" aria-label="语言" data-i18n-aria-label="语言">
+            <option value="zh-CN">简体中文</option>
+            <option value="en">English</option>
+            <option value="zh-TW">繁體中文</option>
+            <option value="ja">日本語</option>
+          </select>
+        </label>
+        <div class="login-content">
+          <div class="login-heading">
+            <p class="eyebrow"><span class="login-mark" aria-hidden="true"></span><span data-i18n="游戏服务器总控">游戏服务器总控</span></p>
+            <h1 data-i18n="一处掌控。">一处掌控。</h1>
+            <p data-i18n="你的游戏世界，随时待命。">你的游戏世界，随时待命。</p>
+          </div>
+          <form id="loginForm" class="glass-panel login-form">
+            <div class="login-form-heading">
+              <h2 data-i18n="登录">登录</h2>
+              <p data-i18n="使用管理账号登录，控制 NAS 上的游戏服务。">使用管理账号登录，控制 NAS 上的游戏服务。</p>
+            </div>
+            <div class="field-group">
+              <label for="usernameInput" data-i18n="账号">账号</label>
+              <input id="usernameInput" name="username" type="text" value="admin" autocomplete="username" maxlength="32" required>
+            </div>
+            <div class="field-group">
+              <label for="passwordInput" data-i18n="密码">密码</label>
+              <input id="passwordInput" name="password" type="password" autocomplete="current-password" required>
+            </div>
+            <button type="submit" class="primary-button" data-i18n="继续">继续</button>
+            <p id="loginError" class="form-error" role="alert"></p>
+          </form>
+        </div>
+      </section>
+
+      <section id="dashboardView" class="dashboard" hidden>
+        <header class="topbar">
+          <div class="brand-lockup">
+            <span class="brand-orb" aria-hidden="true"></span>
+            <div>
+              <p>NAS</p>
+              <h1 data-i18n="游戏服务器">游戏服务器</h1>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <label class="language-picker topbar-language-picker">
+              <span class="sr-only" data-i18n="语言">语言</span>
+              <select class="language-select" aria-label="语言" data-i18n-aria-label="语言">
+                <option value="zh-CN">简体中文</option>
+                <option value="en">English</option>
+                <option value="zh-TW">繁體中文</option>
+                <option value="ja">日本語</option>
+              </select>
+            </label>
+            <button id="logsButton" type="button" class="text-button" data-i18n="日志">日志</button>
+            <button id="refreshButton" type="button" class="text-button" data-i18n="刷新">刷新</button>
+            <button id="logoutButton" type="button" class="text-button" data-i18n="退出">退出</button>
+          </div>
+        </header>
+
+        <div id="globalMessage" class="global-message glass-panel" role="status" aria-live="polite"></div>
+
+        <section id="libraryView">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow" data-i18n="服务">服务</p>
+              <h2 data-i18n="游戏库">游戏库</h2>
+            </div>
+            <div class="controller-state">
+              <span class="status-mark is-running"></span>
+              <span data-i18n="总控运行中">总控运行中</span>
+            </div>
+          </div>
+
+          <section id="gameGrid" class="game-grid" aria-label="游戏服务" data-i18n-aria-label="游戏服务"></section>
+        </section>
+
+        <section id="detailView" class="detail-view" hidden>
+          <div class="detail-toolbar">
+            <button id="backToLibraryButton" type="button" class="text-button" data-i18n="返回游戏库">返回游戏库</button>
+            <button id="refreshDetailButton" type="button" class="text-button" data-i18n="刷新详情">刷新详情</button>
+          </div>
+          <div id="detailContent"></div>
+        </section>
+
+        <footer>
+          <p data-i18n="只有总控随 NAS 自动启动，游戏服务按需运行。">只有总控随 NAS 自动启动，游戏服务按需运行。</p>
+          <p id="lastUpdated"></p>
+        </footer>
+      </section>
+
+      <dialog id="logDialog" class="log-dialog">
+        <div class="log-shell">
+          <header class="log-header">
+            <div>
+              <p class="eyebrow" data-i18n="实时输出">实时输出</p>
+              <h2 data-i18n="服务日志">服务日志</h2>
+            </div>
+            <div class="log-actions">
+              <label class="log-filter" for="logFilter">
+                <span data-i18n="筛选">筛选</span>
+                <select id="logFilter" aria-label="筛选日志" data-i18n-aria-label="筛选">
+                  <option value="" data-i18n="全部">全部</option>
+                </select>
+              </label>
+              <button id="refreshLogsButton" type="button" class="text-button" data-i18n="刷新">刷新</button>
+              <button id="closeLogsButton" type="button" class="text-button" data-i18n="关闭">关闭</button>
+            </div>
+          </header>
+          <div id="logOperationStatus" class="log-operation" role="status" aria-live="polite">
+            <span data-i18n="正在读取操作状态">正在读取操作状态</span>
+          </div>
+          <pre id="logOutput" class="log-output" tabindex="0" data-i18n="正在读取日志…">正在读取日志…</pre>
+          <p class="log-note" data-i18n="显示所选游戏的总控进度和容器最近 500 行日志，每 2 秒自动刷新。">显示所选游戏的总控进度和容器最近 500 行日志，每 2 秒自动刷新。</p>
+        </div>
+      </dialog>
+    </main>
+    <script src="./i18n.js"></script>
+    <script src="./app.js" defer></script>
+  </body>
+</html>

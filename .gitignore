@@ -1,0 +1,7 @@
+data/
+mods/*.jar
+.env
+backups/
+.DS_Store
+__pycache__/
+*.pyc

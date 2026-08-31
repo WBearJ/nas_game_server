@@ -1,0 +1,363 @@
+{
+  "games": [
+    {
+      "id": "minecraft",
+      "name": "Minecraft Java",
+      "description": "NeoForge 模组服务器",
+      "icon": "/assets/minecraft-java.png",
+      "version": "${MC_VERSION:-26.2}",
+      "loader": "NeoForge ${NEOFORGE_VERSION:-26.2.0.62}",
+      "endpoint": "TCP ${MC_GAME_PORT:-25566}",
+      "port": "${MC_GAME_PORT:-25566}",
+      "primary": "minecraft-neoforge",
+      "diskPath": "minecraft",
+      "dataPath": "minecraft/data",
+      "modsPath": "minecraft/mods",
+      "propertiesPath": "minecraft/data/server.properties",
+      "latestLogPath": "minecraft/data/logs/latest.log",
+      "opsPath": "minecraft/data/ops.json",
+      "whitelistPath": "minecraft/data/whitelist.json",
+      "usercachePath": "minecraft/data/usercache.json",
+      "settings": [
+        {"key": "motd", "label": "服务器公告", "type": "text", "maxLength": 120, "target": {"kind": "environment", "name": "MOTD"}},
+        {"key": "maxPlayers", "label": "最大玩家", "type": "integer", "min": 1, "max": 100, "target": {"kind": "environment", "name": "MAX_PLAYERS"}},
+        {"key": "gamemode", "label": "游戏模式", "type": "select", "options": [{"value": "survival", "label": "生存"}, {"value": "creative", "label": "创造"}, {"value": "adventure", "label": "冒险"}, {"value": "spectator", "label": "旁观"}], "target": {"kind": "environment", "name": "MODE"}},
+        {"key": "difficulty", "label": "难度", "type": "select", "options": [{"value": "peaceful", "label": "和平"}, {"value": "easy", "label": "简单"}, {"value": "normal", "label": "普通"}, {"value": "hard", "label": "困难"}], "target": {"kind": "environment", "name": "DIFFICULTY"}},
+        {"key": "viewDistance", "label": "视距", "type": "integer", "min": 3, "max": 32, "target": {"kind": "environment", "name": "VIEW_DISTANCE"}},
+        {"key": "simulationDistance", "label": "模拟距离", "type": "integer", "min": 3, "max": 32, "target": {"kind": "environment", "name": "SIMULATION_DISTANCE"}},
+        {"key": "whitelist", "label": "启用白名单", "type": "boolean", "target": {"kind": "environment", "name": "ENABLE_WHITELIST"}},
+        {"key": "onlineMode", "label": "正版验证", "type": "boolean", "target": {"kind": "environment", "name": "ONLINE_MODE"}}
+      ],
+      "backup": {
+        "directory": "minecraft/backups",
+        "filename": "minecraft-latest.tar.gz",
+        "intervalSeconds": "${BACKUP_INTERVAL_SECONDS:-259200}",
+        "checkIntervalSeconds": "${BACKUP_CHECK_INTERVAL_SECONDS:-3600}"
+      },
+      "hostDirectories": [
+        "minecraft/data",
+        "minecraft/mods",
+        "minecraft/installer",
+        "minecraft/backups"
+      ],
+      "containers": [
+        {
+          "name": "minecraft-neoforge",
+          "role": "server",
+          "startOrder": 10,
+          "image": "${MC_IMAGE:-itzg/minecraft-server:stable-java25}",
+          "tty": true,
+          "openStdin": true,
+          "stopTimeout": 120,
+          "networkMode": "host",
+          "environment": {
+            "EULA": "${EULA:-FALSE}",
+            "TYPE": "NEOFORGE",
+            "VERSION": "${MC_VERSION:-26.2}",
+            "NEOFORGE_VERSION": "${NEOFORGE_VERSION:-26.2.0.62}",
+            "NEOFORGE_INSTALLER": "${NEOFORGE_INSTALLER:-/installer/neoforge-26.2.0.62-installer.jar}",
+            "MEMORY": "${MC_MEMORY:-14G}",
+            "SERVER_PORT": "${MC_GAME_PORT:-25566}",
+            "OVERRIDE_SERVER_PROPERTIES": "TRUE",
+            "PROXY": "${PROXY:-}",
+            "TZ": "${TZ:-Asia/Shanghai}",
+            "UID": "${PUID:-1000}",
+            "GID": "${PGID:-1000}",
+            "MOTD": "${MOTD:-Synology NeoForge 26.2 Server}",
+            "MODE": "${MODE:-survival}",
+            "MAX_PLAYERS": "${MAX_PLAYERS:-10}",
+            "DIFFICULTY": "${DIFFICULTY:-normal}",
+            "VIEW_DISTANCE": "${VIEW_DISTANCE:-10}",
+            "SIMULATION_DISTANCE": "${SIMULATION_DISTANCE:-8}",
+            "ENABLE_WHITELIST": "${ENABLE_WHITELIST:-FALSE}",
+            "WHITELIST": "${WHITELIST:-}",
+            "OPS": "${OPS:-}",
+            "ONLINE_MODE": "${ONLINE_MODE:-TRUE}",
+            "ENFORCE_SECURE_PROFILE": "${ENFORCE_SECURE_PROFILE:-TRUE}",
+            "ENABLE_RCON": "FALSE",
+            "CREATE_CONSOLE_IN_PIPE": "true",
+            "REMOVE_OLD_MODS": "TRUE",
+            "ENABLE_ROLLING_LOGS": "TRUE"
+          },
+          "binds": [
+            "${HOST_PROJECT_PATH}/minecraft/data:/data",
+            "${HOST_PROJECT_PATH}/minecraft/mods:/mods:ro",
+            "${HOST_PROJECT_PATH}/minecraft/installer:/installer:ro"
+          ],
+          "healthcheck": {
+            "test": ["CMD", "mc-health"],
+            "startPeriod": 300000000000,
+            "interval": 30000000000,
+            "timeout": 10000000000,
+            "retries": 5
+          }
+        }
+      ]
+    },
+    {
+      "id": "palworld",
+      "name": "幻兽帕鲁",
+      "description": "Palworld 专用服务器",
+      "icon": "/assets/palworld.png",
+      "version": "自动更新",
+      "loader": "Steam Dedicated Server",
+      "endpoint": "UDP ${PALWORLD_PORT:-8211}",
+      "port": "${PALWORLD_PORT:-8211}",
+      "detailType": "palworld",
+      "primary": "palworld-server",
+      "diskPath": "palworld",
+      "dataPath": "palworld/data/Pal/Saved",
+      "settings": [
+        {"key": "serverName", "label": "服务器名称", "type": "text", "maxLength": 80, "target": {"kind": "environment", "name": "SERVER_NAME"}},
+        {"key": "description", "label": "服务器描述", "type": "text", "maxLength": 200, "target": {"kind": "environment", "name": "SERVER_DESCRIPTION"}},
+        {"key": "serverPassword", "label": "加入密码", "type": "password", "maxLength": 64, "target": {"kind": "environment", "name": "SERVER_PASSWORD"}},
+        {"key": "maxPlayers", "label": "最大玩家", "type": "integer", "min": 1, "max": 32, "target": {"kind": "environment", "name": "PLAYERS"}},
+        {"key": "difficulty", "label": "难度预设", "type": "select", "options": [{"value": "None", "label": "自定义"}, {"value": "Normal", "label": "普通"}, {"value": "Hard", "label": "困难"}], "target": {"kind": "environment", "name": "DIFFICULTY"}},
+        {"key": "expRate", "label": "经验倍率", "type": "number", "min": 0.1, "max": 20, "step": 0.1, "target": {"kind": "environment", "name": "EXP_RATE"}},
+        {"key": "captureRate", "label": "捕获倍率", "type": "number", "min": 0.5, "max": 2, "step": 0.1, "target": {"kind": "environment", "name": "PAL_CAPTURE_RATE"}},
+        {"key": "pvp", "label": "启用 PvP", "type": "boolean", "target": {"kind": "environment", "name": "IS_PVP"}},
+        {"key": "friendlyFire", "label": "友军伤害", "type": "boolean", "target": {"kind": "environment", "name": "ENABLE_FRIENDLY_FIRE"}},
+        {"key": "deathPenalty", "label": "死亡惩罚", "type": "select", "options": [{"value": "None", "label": "无"}, {"value": "Item", "label": "仅物品"}, {"value": "ItemAndEquipment", "label": "物品和装备"}, {"value": "All", "label": "全部"}], "target": {"kind": "environment", "name": "DEATH_PENALTY"}},
+        {"key": "eggHatchTime", "label": "蛋孵化时间", "type": "number", "min": 0, "max": 240, "step": 0.5, "suffix": "小时", "target": {"kind": "environment", "name": "PAL_EGG_DEFAULT_HATCHING_TIME"}},
+        {"key": "autoSave", "label": "自动保存间隔", "type": "number", "min": 10, "max": 3600, "step": 10, "suffix": "秒", "target": {"kind": "environment", "name": "AUTO_SAVE_SPAN"}}
+      ],
+      "backup": {
+        "directory": "palworld/backups",
+        "filename": "palworld-latest.tar.gz",
+        "intervalSeconds": "${BACKUP_INTERVAL_SECONDS:-259200}",
+        "checkIntervalSeconds": "${BACKUP_CHECK_INTERVAL_SECONDS:-3600}"
+      },
+      "hostDirectories": [
+        "palworld/data",
+        "palworld/backups"
+      ],
+      "containers": [
+        {
+          "name": "palworld-server",
+          "role": "server",
+          "startOrder": 10,
+          "image": "${PALWORLD_IMAGE:-thijsvanloef/palworld-server-docker:latest}",
+          "stopTimeout": 120,
+          "networkMode": "bridge",
+          "environment": {
+            "PUID": "${PUID:-1000}",
+            "PGID": "${PGID:-1000}",
+            "TZ": "${TZ:-Asia/Shanghai}",
+            "PORT": "${PALWORLD_PORT:-8211}",
+            "QUERY_PORT": "${PALWORLD_QUERY_PORT:-27015}",
+            "PLAYERS": "${PALWORLD_PLAYERS:-16}",
+            "SERVER_NAME": "${PALWORLD_SERVER_NAME:-Synology Palworld Server}",
+            "SERVER_DESCRIPTION": "${PALWORLD_SERVER_DESCRIPTION:-Palworld dedicated server on Synology NAS}",
+            "SERVER_PASSWORD": "${PALWORLD_SERVER_PASSWORD:-}",
+            "ADMIN_PASSWORD": "${PALWORLD_ADMIN_PASSWORD:-admin123}",
+            "REST_API_ENABLED": "true",
+            "REST_API_PORT": "8212",
+            "RCON_ENABLED": "false",
+            "LOG_LEVEL": "INFO",
+            "COMMUNITY": "${PALWORLD_COMMUNITY:-false}",
+            "CROSSPLAY_PLATFORMS": "${PALWORLD_CROSSPLAY_PLATFORMS:-(Steam,Xbox,PS5,Mac)}",
+            "DIFFICULTY": "${PALWORLD_DIFFICULTY:-None}",
+            "EXP_RATE": "${PALWORLD_EXP_RATE:-1.0}",
+            "PAL_CAPTURE_RATE": "${PALWORLD_CAPTURE_RATE:-1.0}",
+            "IS_PVP": "${PALWORLD_PVP:-false}",
+            "ENABLE_FRIENDLY_FIRE": "${PALWORLD_FRIENDLY_FIRE:-false}",
+            "DEATH_PENALTY": "${PALWORLD_DEATH_PENALTY:-All}",
+            "PAL_EGG_DEFAULT_HATCHING_TIME": "${PALWORLD_EGG_HATCH_TIME:-72.0}",
+            "AUTO_SAVE_SPAN": "${PALWORLD_AUTO_SAVE_SPAN:-30.0}",
+            "ENABLE_PERF_THREADING_ARGS": "true",
+            "UPDATE_ON_BOOT": "true",
+            "BACKUP_ENABLED": "false"
+          },
+          "binds": [
+            "${HOST_PROJECT_PATH}/palworld/data:/palworld/"
+          ],
+          "ports": [
+            {
+              "containerPort": "8211/udp",
+              "hostPort": "${PALWORLD_PORT:-8211}",
+              "hostIp": "0.0.0.0"
+            },
+            {
+              "containerPort": "27015/udp",
+              "hostPort": "${PALWORLD_QUERY_PORT:-27015}",
+              "hostIp": "0.0.0.0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "terraria",
+      "name": "Terraria",
+      "description": "TShock 管理服务器",
+      "icon": "/assets/terraria.png",
+      "version": "自动更新",
+      "loader": "TShock Stable",
+      "endpoint": "TCP ${TERRARIA_PORT:-7777}",
+      "port": "${TERRARIA_PORT:-7777}",
+      "detailType": "terraria",
+      "primary": "terraria-server",
+      "diskPath": "terraria",
+      "dataPath": "terraria/data",
+      "backup": {
+        "directory": "terraria/backups",
+        "filename": "terraria-latest.tar.gz",
+        "intervalSeconds": "${BACKUP_INTERVAL_SECONDS:-259200}",
+        "checkIntervalSeconds": "${BACKUP_CHECK_INTERVAL_SECONDS:-3600}"
+      },
+      "management": {
+        "restPort": "${TERRARIA_REST_PORT:-7878}",
+        "restToken": "${TERRARIA_REST_TOKEN:-admin123}"
+      },
+      "settings": [
+        {"key": "worldName", "label": "世界名称", "type": "text", "maxLength": 48, "pattern": "^[A-Za-z0-9_-]+$", "hint": "更改后会切换到另一份世界文件，不会删除旧世界", "target": {"kind": "command", "flag": "-worldname"}, "linkedFlags": ["-world"]},
+        {"key": "worldSize", "label": "新世界大小", "type": "select", "options": [{"value": "1", "label": "小型"}, {"value": "2", "label": "中型"}, {"value": "3", "label": "大型"}], "hint": "只影响首次生成的新世界", "target": {"kind": "command", "flag": "-autocreate"}},
+        {"key": "difficulty", "label": "新世界难度", "type": "select", "options": [{"value": "0", "label": "普通"}, {"value": "1", "label": "专家"}, {"value": "2", "label": "大师"}, {"value": "3", "label": "旅途"}], "hint": "只影响首次生成的新世界", "target": {"kind": "command", "flag": "-difficulty"}},
+        {"key": "maxPlayers", "label": "最大玩家", "type": "integer", "min": 1, "max": 255, "target": {"kind": "command", "flag": "-maxplayers"}},
+        {"key": "serverPassword", "label": "加入密码", "type": "password", "maxLength": 64, "target": {"kind": "command", "flag": "-password"}},
+        {"key": "motd", "label": "欢迎消息", "type": "text", "maxLength": 120, "target": {"kind": "command", "flag": "-motd"}}
+      ],
+      "hostDirectories": [
+        "terraria/data/worlds",
+        "terraria/data/tshock",
+        "terraria/data/plugins",
+        "terraria/backups"
+      ],
+      "containers": [
+        {
+          "name": "terraria-server",
+          "role": "server",
+          "startOrder": 10,
+          "image": "${TERRARIA_IMAGE:-ghcr.io/pryaxis/tshock:stable}",
+          "tty": true,
+          "openStdin": true,
+          "stopTimeout": 120,
+          "networkMode": "bridge",
+          "command": [
+            "-world", "/worlds/${TERRARIA_WORLD_NAME:-nas-world}.wld",
+            "-autocreate", "${TERRARIA_WORLD_SIZE:-2}",
+            "-worldname", "${TERRARIA_WORLD_NAME:-nas-world}",
+            "-difficulty", "${TERRARIA_DIFFICULTY:-1}",
+            "-port", "7777",
+            "-maxplayers", "${TERRARIA_MAX_PLAYERS:-8}",
+            "-password", "${TERRARIA_SERVER_PASSWORD:-}",
+            "-motd", "${TERRARIA_MOTD:-Synology Terraria Server}",
+            "-rest-enabled", "true",
+            "-rest-token", "${TERRARIA_REST_TOKEN:-admin123}",
+            "-rest-port", "7878"
+          ],
+          "binds": [
+            "${HOST_PROJECT_PATH}/terraria/data/worlds:/worlds",
+            "${HOST_PROJECT_PATH}/terraria/data/tshock:/tshock",
+            "${HOST_PROJECT_PATH}/terraria/data/plugins:/plugins"
+          ],
+          "ports": [
+            {
+              "containerPort": "7777/tcp",
+              "hostPort": "${TERRARIA_PORT:-7777}",
+              "hostIp": "0.0.0.0"
+            },
+            {
+              "containerPort": "7878/tcp",
+              "hostPort": "${TERRARIA_REST_PORT:-7878}",
+              "hostIp": "127.0.0.1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "zomboid",
+      "name": "Project Zomboid",
+      "description": "Build 42 生存服务器",
+      "icon": "/assets/project-zomboid.png",
+      "version": "Build 42 · 自动更新",
+      "loader": "Steam Dedicated Server",
+      "endpoint": "UDP ${PZ_PORT:-16261}–${PZ_STEAM_PORT_2:-16263}",
+      "port": "${PZ_PORT:-16261}",
+      "detailType": "zomboid",
+      "primary": "project-zomboid-server",
+      "diskPath": "zomboid",
+      "dataPath": "zomboid/data",
+      "management": {
+        "rconPort": "${PZ_RCON_HOST_PORT:-27016}",
+        "rconPassword": "${PZ_RCON_PASSWORD:-admin123}"
+      },
+      "settings": [
+        {"key": "serverName", "label": "存档名称", "type": "text", "maxLength": 48, "pattern": "^[A-Za-z0-9_-]+$", "hint": "更改后会切换到另一份存档，不会删除旧世界", "target": {"kind": "environment", "name": "SERVER_NAME"}},
+        {"key": "publicName", "label": "服务器名称", "type": "text", "maxLength": 80, "target": {"kind": "environment", "name": "PUBLIC_NAME"}},
+        {"key": "serverPassword", "label": "加入密码", "type": "password", "maxLength": 64, "target": {"kind": "environment", "name": "SERVER_PASSWORD"}},
+        {"key": "maxPlayers", "label": "最大玩家", "type": "integer", "min": 1, "max": 64, "target": {"kind": "environment", "name": "MAX_PLAYERS"}},
+        {"key": "maxRam", "label": "Java 内存", "type": "select", "options": [{"value": "4096m", "label": "4 GB"}, {"value": "6144m", "label": "6 GB"}, {"value": "8192m", "label": "8 GB"}], "target": {"kind": "environment", "name": "MAX_RAM"}, "linkedEnvironment": ["MIN_RAM"]},
+        {"key": "publicServer", "label": "公开服务器", "type": "boolean", "target": {"kind": "environment", "name": "PUBLIC_SERVER"}},
+        {"key": "pauseOnEmpty", "label": "无人时暂停", "type": "boolean", "target": {"kind": "environment", "name": "PAUSE_ON_EMPTY"}},
+        {"key": "pvp", "label": "启用 PvP", "type": "boolean", "target": {"kind": "environment", "name": "PVP"}},
+        {"key": "steamVac", "label": "Steam VAC", "type": "boolean", "target": {"kind": "environment", "name": "STEAM_VAC"}},
+        {"key": "autosave", "label": "自动保存间隔", "type": "integer", "min": 5, "max": 120, "suffix": "分钟", "target": {"kind": "environment", "name": "AUTOSAVE_INTERVAL"}},
+        {"key": "sandboxMode", "label": "沙盒预设", "type": "select", "options": [{"value": "apocalypse", "label": "末日"}, {"value": "performance", "label": "性能优化"}, {"value": "max", "label": "最高性能"}], "target": {"kind": "environment", "name": "SANDBOX_MODE"}},
+        {"key": "mapNames", "label": "地图", "type": "text", "maxLength": 160, "target": {"kind": "environment", "name": "MAP_NAMES"}},
+        {"key": "workshopIds", "label": "Workshop ID", "type": "text", "maxLength": 1000, "pattern": "^[0-9;]*$", "allowEmpty": true, "hint": "多个 Steam Workshop 数字 ID 使用分号分隔", "target": {"kind": "environment", "name": "MOD_WORKSHOP_IDS"}},
+        {"key": "modNames", "label": "Mod ID", "type": "text", "maxLength": 1000, "pattern": "^[A-Za-z0-9_.;:-]*$", "allowEmpty": true, "hint": "多个 mod.info 中的 Mod ID 使用分号分隔", "target": {"kind": "environment", "name": "MOD_NAMES"}}
+      ],
+      "backup": {
+        "directory": "zomboid/backups",
+        "filename": "zomboid-latest.tar.gz",
+        "intervalSeconds": "${BACKUP_INTERVAL_SECONDS:-259200}",
+        "checkIntervalSeconds": "${BACKUP_CHECK_INTERVAL_SECONDS:-3600}"
+      },
+      "hostDirectories": [
+        "zomboid/data",
+        "zomboid/server-files",
+        "zomboid/backups"
+      ],
+      "hostOwnership": {"uid": 1000, "gid": 1000},
+      "containers": [
+        {
+          "name": "project-zomboid-server",
+          "role": "server",
+          "startOrder": 10,
+          "image": "${PZ_IMAGE:-faudil/project-zomboid-server:latest}",
+          "stopTimeout": 180,
+          "networkMode": "bridge",
+          "environment": {
+            "TZ": "${TZ:-Asia/Shanghai}",
+            "SERVER_NAME": "${PZ_SERVER_NAME:-nas-zomboid}",
+            "PUBLIC_NAME": "${PZ_PUBLIC_NAME:-Synology Project Zomboid Server}",
+            "PUBLIC_SERVER": "${PZ_PUBLIC_SERVER:-true}",
+            "SERVER_PASSWORD": "${PZ_SERVER_PASSWORD:-}",
+            "ADMIN_PASSWORD": "${PZ_ADMIN_PASSWORD:-admin123}",
+            "RCON_PASSWORD": "${PZ_RCON_PASSWORD:-admin123}",
+            "RCON_PORT": "27015",
+            "DEFAULT_PORT": "16261",
+            "UDP_PORT": "16262",
+            "MAX_PLAYERS": "${PZ_MAX_PLAYERS:-8}",
+            "MAX_RAM": "${PZ_MAX_RAM:-6144m}",
+            "MIN_RAM": "${PZ_MAX_RAM:-6144m}",
+            "PVP": "${PZ_PVP:-true}",
+            "PAUSE_ON_EMPTY": "${PZ_PAUSE_ON_EMPTY:-true}",
+            "STEAM_VAC": "${PZ_STEAM_VAC:-true}",
+            "USE_STEAM": "true",
+            "MAP_NAMES": "${PZ_MAP_NAMES:-Muldraugh, KY}",
+            "AUTOSAVE_INTERVAL": "${PZ_AUTOSAVE_INTERVAL:-15}",
+            "SANDBOX_MODE": "${PZ_SANDBOX_MODE:-apocalypse}",
+            "MOD_WORKSHOP_IDS": "${PZ_MOD_WORKSHOP_IDS:-}",
+            "MOD_NAMES": "${PZ_MOD_NAMES:-}",
+            "MOD_UPDATE_ON_START": "true",
+            "UPDATE_ON_START": "true",
+            "BACKUP_ENABLED": "false"
+          },
+          "binds": [
+            "${HOST_PROJECT_PATH}/zomboid/data:/home/steam/Zomboid",
+            "${HOST_PROJECT_PATH}/zomboid/server-files:/home/steam/pzserver"
+          ],
+          "ports": [
+            {"containerPort": "16261/udp", "hostPort": "${PZ_PORT:-16261}", "hostIp": "0.0.0.0"},
+            {"containerPort": "16262/udp", "hostPort": "${PZ_STEAM_PORT:-16262}", "hostIp": "0.0.0.0"},
+            {"containerPort": "16263/udp", "hostPort": "${PZ_STEAM_PORT_2:-16263}", "hostIp": "0.0.0.0"},
+            {"containerPort": "27015/tcp", "hostPort": "${PZ_RCON_HOST_PORT:-27016}", "hostIp": "127.0.0.1"}
+          ]
+        }
+      ]
+    }
+  ]
+}
