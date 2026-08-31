@@ -1357,6 +1357,32 @@ def minecraft_players(game):
     }
 
 
+def minecraft_access_lists(game):
+    def entries(relative, include_reason=False):
+        result = []
+        for item in read_json_file(relative, []):
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "")).strip()
+            if not re.fullmatch(r"[A-Za-z0-9_]{1,16}", name):
+                continue
+            entry = {"name": name, "uuid": item.get("uuid")}
+            if include_reason:
+                entry.update({
+                    "reason": item.get("reason"),
+                    "created": item.get("created"),
+                    "expires": item.get("expires")
+                })
+            result.append(entry)
+        return sorted(result, key=lambda entry: entry["name"].lower())
+
+    return {
+        "operators": entries(game.get("opsPath")),
+        "whitelist": entries(game.get("whitelistPath")),
+        "bannedPlayers": entries(game.get("bannedPlayersPath"), include_reason=True)
+    }
+
+
 def backup_info(game):
     config = game.get("backup") or {}
     if not config or not HOST_PROJECT_MOUNT.is_dir():
@@ -1486,6 +1512,8 @@ def minecraft_detail(game):
         },
         "backup": backup_info(game),
         "mods": mods_info(game),
+        "accessLists": minecraft_access_lists(game),
+        "runtimeLocked": minecraft_runtime_locked(game),
         "settings": settings_info(game),
         "runtime": minecraft_catalog(),
         "supportsMods": MINECRAFT_LOADERS.get(current_minecraft_loader(game), MINECRAFT_LOADERS["neoforge"])["mods"]
@@ -2002,6 +2030,25 @@ def primary_spec(game):
     )
 
 
+def minecraft_runtime_locked(game):
+    if game.get("id") != "minecraft":
+        return False
+    properties_path = game.get("propertiesPath")
+    if properties_path and HOST_PROJECT_MOUNT.is_dir():
+        try:
+            if safe_host_path(properties_path).is_file():
+                return True
+        except DockerError:
+            pass
+    spec = primary_spec(game)
+    if not spec:
+        return False
+    try:
+        return DOCKER.inspect(spec["name"]) is not None
+    except DockerError:
+        return False
+
+
 def setting_current_value(game, definition):
     spec = primary_spec(game) or {}
     target = definition.get("target") or {}
@@ -2022,15 +2069,20 @@ def setting_current_value(game, definition):
 
 def settings_info(game):
     result = []
+    runtime_locked = minecraft_runtime_locked(game)
     for definition in game.get("settings", []):
         item = {
             key: value for key, value in definition.items()
             if key not in ("target", "linkedFlags", "linkedEnvironment")
         }
         item["value"] = setting_current_value(game, definition)
+        if runtime_locked and definition.get("key") in ("loader", "mcVersion"):
+            item["locked"] = True
+            item["hint"] = "服务器初始化后不可修改；如需更换，请删除服务器数据后重新初始化"
         if definition.get("key") == "mcVersion" and game.get("id") == "minecraft":
             loader_id = current_minecraft_loader(game)
-            item["options"] = [{"value": version, "label": version} for version in loader_version_choices(loader_id)]
+            versions = [item["value"]] if item.get("locked") else loader_version_choices(loader_id)
+            item["options"] = [{"value": version, "label": version} for version in versions if version]
             if item["value"] and item["value"] not in {option["value"] for option in item["options"]}:
                 item["options"].insert(0, {"value": item["value"], "label": item["value"]})
         if definition.get("type") == "password":
@@ -2053,6 +2105,8 @@ def validate_settings(game, submitted):
     unknown = set(submitted) - set(definitions)
     if unknown:
         raise DockerError(400, f"包含不支持的配置：{', '.join(sorted(unknown))}")
+    if minecraft_runtime_locked(game) and set(submitted) & {"loader", "mcVersion"}:
+        raise DockerError(409, "服务器初始化后不能修改加载器或游戏版本")
     normalized = {}
     for key, raw in submitted.items():
         definition = definitions[key]
@@ -2580,7 +2634,9 @@ PLAYER_ACTIONS = {
     "op": lambda name: f"op {name}",
     "deop": lambda name: f"deop {name}",
     "whitelist-add": lambda name: f"whitelist add {name}",
-    "whitelist-remove": lambda name: f"whitelist remove {name}"
+    "whitelist-remove": lambda name: f"whitelist remove {name}",
+    "ban": lambda name: f"ban {name} 由服务器管理员加入黑名单",
+    "pardon": lambda name: f"pardon {name}"
 }
 
 
@@ -2596,7 +2652,9 @@ def run_player_action(game, player_name, action):
         "op": "授予管理员",
         "deop": "取消管理员",
         "whitelist-add": "加入白名单",
-        "whitelist-remove": "移出白名单"
+        "whitelist-remove": "移出白名单",
+        "ban": "加入黑名单",
+        "pardon": "移出黑名单"
     }
     return f"已对 {player_name} 执行：{labels[action]}"
 
@@ -2964,7 +3022,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_response(exc.status, {"error": str(exc)})
             return
         player_match = re.fullmatch(
-            r"/api/games/([a-z0-9_-]+)/players/([A-Za-z0-9_]{1,16})/(kick|op|deop|whitelist-add|whitelist-remove)",
+            r"/api/games/([a-z0-9_-]+)/players/([A-Za-z0-9_]{1,16})/(kick|op|deop|whitelist-add|whitelist-remove|ban|pardon)",
             path
         )
         if player_match:

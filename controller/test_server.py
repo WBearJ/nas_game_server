@@ -339,6 +339,39 @@ class ControllerTests(unittest.TestCase):
             [("minecraft-neoforge", ["mc-send-to-console", "op PlayerOne"], "1000")]
         )
 
+    def test_minecraft_ban_and_pardon_use_fixed_console_commands(self):
+        docker = FakeManagedDocker()
+        SERVER.DOCKER = docker
+        game = {
+            "id": "minecraft",
+            "primary": "minecraft-neoforge",
+            "containers": [{
+                "name": "minecraft-neoforge",
+                "environment": {"UID": "1000"}
+            }]
+        }
+        SERVER.run_player_action(game, "PlayerOne", "ban")
+        SERVER.run_player_action(game, "PlayerOne", "pardon")
+        self.assertEqual(docker.commands, [
+            ("minecraft-neoforge", ["mc-send-to-console", "ban PlayerOne 由服务器管理员加入黑名单"], "1000"),
+            ("minecraft-neoforge", ["mc-send-to-console", "pardon PlayerOne"], "1000")
+        ])
+
+    def test_minecraft_access_lists_are_loaded_and_sorted(self):
+        game = copy.deepcopy(next(item for item in SERVER.GAMES if item["id"] == "minecraft"))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            data = root / "minecraft" / "data"
+            data.mkdir(parents=True)
+            (data / "ops.json").write_text('[{"uuid":"2","name":"Zed"},{"uuid":"1","name":"Alice"}]', encoding="utf-8")
+            (data / "whitelist.json").write_text('[{"uuid":"3","name":"Bob"}]', encoding="utf-8")
+            (data / "banned-players.json").write_text('[{"uuid":"4","name":"Eve","reason":"testing"}]', encoding="utf-8")
+            SERVER.HOST_PROJECT_MOUNT = root
+            lists = SERVER.minecraft_access_lists(game)
+        self.assertEqual([item["name"] for item in lists["operators"]], ["Alice", "Zed"])
+        self.assertEqual(lists["whitelist"][0]["name"], "Bob")
+        self.assertEqual(lists["bannedPlayers"][0]["reason"], "testing")
+
     def test_palworld_player_action_uses_container_rest_client(self):
         docker = FakePalworldDocker()
         SERVER.DOCKER = docker
@@ -418,6 +451,28 @@ class ControllerTests(unittest.TestCase):
             SERVER.validate_settings(game, {"unknown": "value"})
         with self.assertRaises(SERVER.DockerError):
             SERVER.validate_settings(game, {"viewDistance": 100})
+
+    def test_minecraft_runtime_fields_lock_after_container_creation(self):
+        game = copy.deepcopy(next(item for item in SERVER.GAMES if item["id"] == "minecraft"))
+        SERVER.DOCKER = FakeManagedDocker()
+        settings = {item["key"]: item for item in SERVER.settings_info(game)}
+        self.assertTrue(settings["loader"]["locked"])
+        self.assertTrue(settings["mcVersion"]["locked"])
+        with self.assertRaises(SERVER.DockerError) as context:
+            SERVER.validate_settings(game, {"loader": "fabric", "mcVersion": "1.20.1"})
+        self.assertEqual(context.exception.status, 409)
+        self.assertEqual(SERVER.validate_settings(game, {"maxPlayers": 12}), {"maxPlayers": "12"})
+
+    def test_minecraft_runtime_fields_remain_locked_when_data_exists(self):
+        game = copy.deepcopy(next(item for item in SERVER.GAMES if item["id"] == "minecraft"))
+        SERVER.DOCKER = FakeDocker()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            properties = root / "minecraft" / "data" / "server.properties"
+            properties.parent.mkdir(parents=True)
+            properties.write_text("motd=test\n", encoding="utf-8")
+            SERVER.HOST_PROJECT_MOUNT = root
+            self.assertTrue(SERVER.minecraft_runtime_locked(game))
 
     def test_password_left_blank_is_not_overwritten(self):
         game = next(item for item in SERVER.GAMES if item["id"] == "palworld")

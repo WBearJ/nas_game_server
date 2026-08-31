@@ -1443,6 +1443,10 @@ button:disabled {
   grid-column: span 2;
 }
 
+.access-panel {
+  grid-column: span 2;
+}
+
 .mods-panel {
   grid-column: span 2;
 }
@@ -1637,6 +1641,112 @@ button:disabled {
   color: #ffd0e3;
 }
 
+.access-add-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(110px, 0.45fr) auto;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.access-add-form input,
+.access-add-form select {
+  min-width: 0;
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 11px;
+  outline: none;
+  background: rgba(9, 10, 21, 0.62);
+  color: var(--white);
+  padding: 0 10px;
+  font: inherit;
+  font-size: 11px;
+}
+
+.access-add-form input:focus,
+.access-add-form select:focus {
+  border-color: rgba(0, 240, 255, 0.68);
+  box-shadow: 0 0 15px rgba(0, 240, 255, 0.14);
+}
+
+.access-groups {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+  padding: 12px 0 10px;
+}
+
+.access-group {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.access-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.access-group-heading strong {
+  font-size: 12px;
+}
+
+.access-group-heading span {
+  color: var(--cyan);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.access-list {
+  max-height: 230px;
+  display: grid;
+  gap: 5px;
+  padding: 7px;
+  overflow: auto;
+}
+
+.access-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.access-identity {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.access-identity strong {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.access-identity span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty-state.compact {
+  padding: 8px 4px;
+  font-size: 10px;
+}
+
 .configuration-panel {
   grid-column: span 2;
 }
@@ -1713,6 +1823,19 @@ button:disabled {
 
 .setting-field.is-toggle .setting-control {
   justify-content: flex-end;
+}
+
+.setting-field.is-locked {
+  border-color: rgba(0, 240, 255, 0.16);
+  background: rgba(0, 240, 255, 0.045);
+}
+
+.setting-locked-value {
+  min-width: 0;
+  color: #bffbff;
+  font-size: 11px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .setting-control input[type="checkbox"] {
@@ -2108,6 +2231,10 @@ footer p {
     grid-column: auto;
   }
 
+  .access-panel {
+    grid-column: auto;
+  }
+
   .mods-panel {
     grid-column: auto;
   }
@@ -2121,6 +2248,14 @@ footer p {
   }
 
   .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .access-groups {
+    grid-template-columns: 1fr;
+  }
+
+  .access-add-form {
     grid-template-columns: 1fr;
   }
 

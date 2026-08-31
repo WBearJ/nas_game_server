@@ -929,6 +929,8 @@ function getDetailSignature(game) {
     serverInfo: game.serverInfo,
     configuration: game.configuration,
     settings: game.settings,
+    runtimeLocked: game.runtimeLocked,
+    accessLists: game.accessLists,
     features: game.features,
     managementAvailable: game.managementAvailable,
     managementError: game.managementError,
@@ -992,8 +994,8 @@ function detailAction(label, game, action, secondary = false) {
   return button;
 }
 
-function playerActionButton(label, gameId, player, action, secondary = true) {
-  const button = createElement("button", `player-action${secondary ? " secondary" : ""}`, label);
+function playerActionButton(label, gameId, player, action, secondary = true, danger = false) {
+  const button = createElement("button", `player-action${secondary ? " secondary" : ""}${danger ? " danger" : ""}`, label);
   button.type = "button";
   button.addEventListener("click", () => runPlayerAction(gameId, player, action));
   return button;
@@ -1082,8 +1084,88 @@ function renderPlayer(game, player) {
       player.isWhitelisted ? "whitelist-remove" : "whitelist-add"
     )
   );
+  actions.append(playerActionButton("加入黑名单", game.id, player.name, "ban", true, true));
   row.append(identity, actions);
   return row;
+}
+
+function renderAccessEntry(game, entry, removeAction) {
+  const row = createElement("article", "access-row");
+  const identity = createElement("div", "access-identity");
+  identity.append(createElement("strong", "", entry.name));
+  if (entry.reason) identity.append(createElement("span", "", `原因：${entry.reason}`));
+  else if (entry.uuid) identity.append(createElement("span", "", `UUID：${entry.uuid}`));
+  const remove = createElement("button", "player-action secondary danger", "移除");
+  remove.type = "button";
+  remove.disabled = game.state !== "running" || Boolean(activeOperation.running);
+  remove.addEventListener("click", () => runPlayerAction(game.id, entry.name, removeAction));
+  row.append(identity, remove);
+  return row;
+}
+
+function renderAccessGroup(game, label, entries, removeAction) {
+  const group = createElement("section", "access-group");
+  const heading = createElement("div", "access-group-heading");
+  heading.append(createElement("strong", "", label), createElement("span", "", String(entries.length)));
+  const list = createElement("div", "access-list");
+  if (!entries.length) list.append(createElement("p", "empty-state compact", "当前名单为空。"));
+  else list.append(...entries.map((entry) => renderAccessEntry(game, entry, removeAction)));
+  group.append(heading, list);
+  return group;
+}
+
+function renderAccessPanel(game) {
+  const lists = game.accessLists || { operators: [], whitelist: [], bannedPlayers: [] };
+  const panel = createElement("section", "detail-panel access-panel glass-panel");
+  const heading = createElement("div", "panel-heading");
+  const title = document.createElement("div");
+  const total = lists.operators.length + lists.whitelist.length + lists.bannedPlayers.length;
+  title.append(createElement("p", "eyebrow", "访问控制"), createElement("h2", "", "名单管理"));
+  heading.append(title, createElement("strong", "panel-count", String(total)));
+
+  const addForm = createElement("form", "access-add-form");
+  const nameInput = document.createElement("input");
+  nameInput.type = "text";
+  nameInput.maxLength = 16;
+  nameInput.pattern = "[A-Za-z0-9_]{1,16}";
+  nameInput.placeholder = t("输入 Minecraft 玩家名");
+  const typeSelect = document.createElement("select");
+  for (const [value, label] of [["op", "管理员"], ["whitelist-add", "白名单"], ["ban", "黑名单"]]) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = tt(label);
+    typeSelect.append(option);
+  }
+  const add = createElement("button", "player-action", "加入名单");
+  add.type = "submit";
+  const disabled = game.state !== "running" || Boolean(activeOperation.running);
+  nameInput.disabled = disabled;
+  typeSelect.disabled = disabled;
+  add.disabled = disabled;
+  addForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const name = nameInput.value.trim();
+    if (!name || !nameInput.checkValidity()) {
+      nameInput.reportValidity();
+      return;
+    }
+    const completed = await runPlayerAction(game.id, name, typeSelect.value);
+    if (completed) nameInput.value = "";
+  });
+  addForm.append(nameInput, typeSelect, add);
+
+  const groups = createElement("div", "access-groups");
+  groups.append(
+    renderAccessGroup(game, "管理员", lists.operators, "deop"),
+    renderAccessGroup(game, "白名单", lists.whitelist, "whitelist-remove"),
+    renderAccessGroup(game, "黑名单", lists.bannedPlayers, "pardon")
+  );
+  const note = createElement("p", "settings-note", disabled
+    ? "启动服务器后可以添加或移除名单成员。"
+    : "名单修改会立即写入 Minecraft 服务器。"
+  );
+  panel.append(heading, addForm, groups, note);
+  return panel;
 }
 
 function renderMod(gameId, mod) {
@@ -1103,8 +1185,16 @@ function renderMod(gameId, mod) {
 }
 
 function renderSettingField(setting) {
-  const field = createElement("label", `setting-field${setting.type === "boolean" ? " is-toggle" : ""}`);
+  const field = createElement("label", `setting-field${setting.type === "boolean" ? " is-toggle" : ""}${setting.locked ? " is-locked" : ""}`);
   const heading = createElement("span", "setting-label", setting.label);
+  if (setting.locked) {
+    field.append(
+      heading,
+      createElement("span", "setting-locked-value", setting.value ?? "—"),
+      createElement("small", "setting-hint", setting.hint || "服务器初始化后不可修改")
+    );
+    return field;
+  }
   let input;
   if (setting.type === "select") {
     input = document.createElement("select");
@@ -1427,6 +1517,7 @@ function renderDetail(game) {
 
   const lowerGrid = createElement("div", "detail-grid");
   lowerGrid.append(playersPanel, worldPanel);
+  if (game.detailType === "minecraft") lowerGrid.append(renderAccessPanel(game));
   lowerGrid.append(configurationPanel);
   if (["palworld", "terraria", "zomboid"].includes(game.detailType)) lowerGrid.append(announcePanel);
   if (game.detailType === "minecraft" && game.supportsMods !== false) lowerGrid.append(modsPanel);
@@ -1496,6 +1587,7 @@ function closeGameDetail() {
 }
 
 async function runPlayerAction(gameId, playerName, action) {
+  if (action === "ban" && !window.confirm(t("确定将该玩家加入黑名单吗？"))) return false;
   try {
     const payload = await api(
       `/api/games/${gameId}/players/${encodeURIComponent(playerName)}/${action}`,
@@ -1504,8 +1596,10 @@ async function runPlayerAction(gameId, playerName, action) {
     setMessage(payload.message);
     await delay(700);
     await loadGameDetail({ quiet: true });
+    return true;
   } catch (error) {
     setMessage(error.message, true);
+    return false;
   }
 }
 

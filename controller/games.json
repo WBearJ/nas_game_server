@@ -18,6 +18,7 @@
       "latestLogPath": "minecraft/data/logs/latest.log",
       "opsPath": "minecraft/data/ops.json",
       "whitelistPath": "minecraft/data/whitelist.json",
+      "bannedPlayersPath": "minecraft/data/banned-players.json",
       "usercachePath": "minecraft/data/usercache.json",
       "settings": [
         {"key": "loader", "label": "加载器", "type": "select", "options": [{"value": "vanilla", "label": "原版"}, {"value": "forge", "label": "Forge"}, {"value": "fabric", "label": "Fabric"}, {"value": "neoforge", "label": "NeoForge"}], "hint": "原版不使用 Mod；切换加载器后只会列出该加载器支持的游戏版本", "target": {"kind": "minecraftRuntime"}},
