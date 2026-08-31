@@ -21,7 +21,7 @@ minecraft-synology/
 
 1. `MEMORY=14G`：这是 Java 堆上限，不是平时实际占用。家庭模组服实测大约 2–4 GB。NAS 总内存 20 GB 时，给 DSM 和文件缓存留出余量即可。
 2. `OPS`：可填写管理员的正版 Java 版用户名，多个名字用英文逗号分隔。
-3. 如果服务器要开放到互联网，设置 `ENABLE_WHITELIST=TRUE`，并在 `WHITELIST` 填写允许加入的用户名。
+3. 可选启用白名单：设置 `ENABLE_WHITELIST=TRUE`，并在 `WHITELIST` 填写允许加入的用户名。
 4. `EULA=TRUE` 表示接受 [Minecraft EULA](https://aka.ms/MinecraftEULA)；如不同意，请不要启动。
 
 中国大陆网络若无法稳定访问 NeoForge Maven，可在 `.env` 的 `PROXY` 填入 NAS 能访问的 HTTP 代理，格式为 `主机:端口`。代理运行在 NAS 本机且允许相关连接时可使用 `127.0.0.1:端口`；代理运行在路由器或另一台电脑时填写它的局域网 IP，且必须开启“允许局域网连接”。
@@ -67,14 +67,9 @@ docker exec --user 1000 minecraft-neoforge mc-send-to-console whitelist add Play
 docker exec --user 1000 minecraft-neoforge mc-send-to-console op PlayerName
 ```
 
-## 互联网访问与安全
+## 局域网连接
 
-局域网游玩不需要路由器端口转发。让外网玩家加入时，可选择：
-
-- 推荐：使用 Tailscale 等组网工具，不直接暴露 NAS 端口；或
-- 在路由器上仅转发 TCP `25566` 到 NAS，并在 DSM 防火墙仅开放所需来源。
-
-当前配置使用主机网络模式以绕过 NAS 的 Docker 端口映射故障，Minecraft 直接监听 TCP `25566`，RCON 已关闭。不要开放 DSM 管理端口或 RCON `25575`。保持 `ONLINE_MODE=TRUE`，防止用户名伪造。公网开放前务必启用白名单。
+当前配置使用主机网络模式，Minecraft 直接监听 TCP `25566`，RCON 已关闭。用 Java 版客户端连接 `NAS局域网IP:25566`。
 
 ## 备份与升级
 
@@ -86,5 +81,4 @@ docker exec --user 1000 minecraft-neoforge mc-send-to-console op PlayerName
 
 - **容器持续重启**：先查看日志；通常是模组版本错误、缺少前置依赖、内存不足或文件权限问题。
 - **客户端提示模组不匹配**：确保客户端与服务端的 Minecraft、NeoForge、模组及依赖版本一致。
-- **局域网能连、外网不能**：检查路由器端口转发、DSM 防火墙、运营商 CGNAT；CGNAT 环境建议使用 Tailscale。
 - **改了模组但未生效**：确认 jar 位于项目的 `mods/`，然后重启容器。不要只改 `data/mods/`，因为启动时会按 `mods/` 同步。
