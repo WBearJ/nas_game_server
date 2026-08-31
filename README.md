@@ -17,26 +17,65 @@ nas_game_server/
 │   ├── games.json            # 游戏、数据路径和容器注册表
 │   └── static/               # 网页控制面板与本地游戏图标
 ├── minecraft/
-    ├── data/                 # 世界和服务端数据
-    ├── mods/                 # NeoForge 模组
-    ├── installer/            # 离线 NeoForge 安装器
-    └── backups/              # 自动与手动备份，只保留 latest
-└── palworld/
-    ├── data/                 # Steam 服务端、配置与世界存档
-    └── backups/              # 帕鲁最新备份
-└── terraria/
-    ├── data/                 # 世界、TShock 配置与插件
-    └── backups/              # Terraria 最新备份
+│   ├── data/                 # 世界和服务端数据
+│   ├── mods/                 # NeoForge 模组
+│   ├── installer/            # 离线 NeoForge 安装器
+│   └── backups/              # 自动与手动备份，只保留 latest
+├── palworld/
+│   ├── data/                 # Steam 服务端、配置与世界存档
+│   └── backups/              # 帕鲁最新备份
+├── terraria/
+│   ├── data/                 # 世界、TShock 配置与插件
+│   └── backups/              # Terraria 最新备份
 └── zomboid/
     ├── data/                 # 存档、配置和 Workshop 数据
     ├── server-files/         # Build 42 服务端文件
     └── backups/              # Project Zomboid 最新备份
 ```
 
+## 推荐配置
+
+本项目按家庭局域网、**总控常驻、游戏按需启动**来调校。群晖 DSM、Docker 和文件缓存建议预留约 **4–6 GB** 内存，不要把全部 RAM 分给游戏。游戏服务端基本都是 x86_64，ARM 群晖一般无法运行。
+
+### NAS 硬件
+
+| 项目 | 最低 | 推荐 |
+| --- | --- | --- |
+| CPU | x86_64 四核 | 六核以上，单核性能较好（Intel / AMD） |
+| 内存 | 16 GB | **20 GB 及以上**（仓库默认按 20 GB NAS 给 Minecraft 分配 `14G`） |
+| 存储 | HDD 仅适合 Terraria 这类轻量服 | **SSD / NVMe**。帕鲁和 Project Zomboid 写存档很频繁，机械盘容易卡顿甚至损坏存档 |
+| 可用空间 | 40 GB | **80 GB 以上**（Docker 镜像 + Steam 服务端 + 世界 + 一份备份） |
+| 网络 | 千兆局域网 | 千兆局域网；公网联机再保证稳定上传 |
+
+32 GB 及以上时，可以把 Minecraft 内存降到 `12G` 后与 Terraria 长期同开，或把 Project Zomboid 调到 8 GB。即便内存充裕，也不要同时运行两个大型服（Minecraft、幻兽帕鲁、Project Zomboid 不要叠开）。
+
+### 各游戏资源占用
+
+下表为家庭 2–10 人、使用本仓库默认人数时的经验值。磁盘会随世界、模组和备份增长；每个游戏只保留最新一份备份。
+
+| | 网页总控 | Minecraft Java（NeoForge） | 幻兽帕鲁 | Terraria（TShock） | Project Zomboid（Build 42） |
+| --- | --- | --- | --- | --- | --- |
+| 运行内存 | 约 100–300 MB | 约 12–16 GB | 约 8–16 GB | 约 0.5–2 GB | 约 5–9 GB |
+| 本仓库默认 | 常驻 | `MEMORY=14G` | 不限制容器上限，随玩家和建筑上涨 | 8 人、中型世界约 1 GB | `PZ_MAX_RAM=6144m`（Java 堆 6 GB，可选 4 / 6 / 8 GB） |
+| 首次磁盘 | 镜像约 0.2–0.5 GB | 镜像 1–2 GB；服务端 + 模组约 2–5 GB | Steam 服务端约 12–20 GB | 镜像约 0.5–1 GB | Steam 服务端约 10–15 GB |
+| 日常磁盘 | 可忽略 | 世界常见 2–10 GB+ | 世界约 1–5 GB | 世界 50–400 MB | 存档约 2–10 GB，Workshop 模组另计 |
+| CPU | 很低 | 2–4 核，模组越多越吃单核 | 4 核以上 | 1–2 核 | 4 核，偏单核 |
+| 默认人数 | — | 10 | 16 | 8 | 8 |
+| 20 GB NAS | 始终可开 | 独占大型服；可顺带开 Terraria（建议把内存降到 `12G`） | 独占大型服；可顺带开 Terraria | 可与任意一个大型服同开 | 独占大型服；可顺带开 Terraria |
+
+**20 GB 内存 NAS 同时运行建议：**
+
+- 可以：总控 + 任意一个大型服 + Terraria
+- 不要：Minecraft + 幻兽帕鲁；Minecraft + Project Zomboid；幻兽帕鲁 + Project Zomboid；三个大型服一起开
+
+内存不够时，DSM 会开始使用交换分区或直接杀掉容器，表现为卡顿、存档损坏或容器反复重启。换游戏前请先在网页里停止当前大型服。
+
+Minecraft 若同时跑其他高内存套件，把 `.env` 的 `MEMORY` 从 `14G` 降到 `12G`。帕鲁官方建议 16 GB，8 GB 能启动但容易内存不足。Project Zomboid 首次启动会下载服务端，网页里可把 Java 内存改成 4 / 6 / 8 GB。
+
 ## 群晖部署
 
 1. 将整个目录上传为 `/volume1/docker/nas_game_server`。如果使用其他路径，必须同步修改 `.env` 的 `HOST_PROJECT_PATH`。
-2. 打开 `.env`，确认管理账号、`EULA=TRUE`、内存、端口和 Minecraft 参数。默认账号为 `admin`，默认密码为 `admin123`。
+2. 打开 `.env`，确认管理账号、`EULA=TRUE`、内存、端口和 Minecraft 参数。默认账号为 `admin`，默认密码为 `admin123`。内存和磁盘占用见上文「推荐配置」。
 3. 若旧的 `minecraft-neoforge` 项目仍在运行，先备份并确认世界位于 `minecraft/data`，再停止并删除旧项目中的 `minecraft-neoforge` 容器。旧版本若还留有 `minecraft-backup` 容器，也可停止并删除；新版已经不再使用它。只删除容器，不要勾选删除数据，也不要删除 `minecraft/data`、`mods`、`installer` 或 `backups` 文件夹。
 4. 打开 **Container Manager → 项目 → 新增**，项目名称填写 `nas-game-server`，路径选择根目录，使用根目录的 `compose.yaml`。
 5. 构建并启动项目。此时只会出现并运行 `nas-game-controller`。
@@ -103,8 +142,7 @@ CONTROL_ACCOUNTS_JSON={"admin":"换成高强度密码","family":"另一个密码
 - 幻兽帕鲁支持网页发送服务器公告、立即保存、手动备份、启动、停止、重启与日志查看。服务端更新由容器在启动时自动检查。
 - Terraria 使用 TShock 稳定版镜像，详情页支持在线玩家、IP、TShock 账号组、踢出、封禁、服务器公告、保存世界和备份。默认游戏端口为 TCP `7777`；管理端口 `7878` 只绑定 NAS 本机，不要转发到公网。
 - Project Zomboid 使用 Build 42 自动更新镜像，详情页支持 RCON 在线玩家、踢出、封禁、公告、保存、备份以及 Workshop ID/Mod ID 配置。公网连接需要放行 UDP `16261`–`16263`；RCON TCP `27016` 只绑定 NAS 本机，不要转发到公网。
-- 幻兽帕鲁服务端通常需要较多内存。20 GB 总内存的 NAS 不建议同时运行 Minecraft 与幻兽帕鲁，以免系统开始交换内存或杀死容器。
-- Project Zomboid 默认分配 6 GB Java 内存，首次启动还会下载服务端文件。20 GB NAS 上建议大型游戏服务器按需单独运行，不要同时启动 Minecraft、幻兽帕鲁和 Project Zomboid。
+- 内存、磁盘和同时运行限制见上文「推荐配置」。网页游戏卡片也会显示实时 CPU、内存和目录大小，可按实际占用再调整。
 
 ## 注册其他游戏
 

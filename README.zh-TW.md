@@ -18,10 +18,49 @@ nas_game_server/
 └── zomboid/                  # 存檔、Build 42 檔案、Workshop 資料和備份
 ```
 
+## 建議配置
+
+本專案依家庭區域網路、「總控常駐、遊戲按需啟動」調校。Synology DSM、Docker 和檔案快取建議預留約 **4–6 GB** 記憶體，不要把全部 RAM 分給遊戲。遊戲伺服器基本上都是 x86_64，ARM 群暉通常無法運行。
+
+### NAS 硬體
+
+| 項目 | 最低 | 建議 |
+| --- | --- | --- |
+| CPU | x86_64 四核 | 六核以上，單核效能較好（Intel / AMD） |
+| 記憶體 | 16 GB | **20 GB 以上**（倉庫預設依 20 GB NAS 將 Minecraft 設為 `14G`） |
+| 儲存 | HDD 僅適合 Terraria 這類輕量伺服器 | **SSD / NVMe**。Palworld 與 Project Zomboid 寫入存檔很頻繁，機械硬碟容易卡頓甚至損壞存檔 |
+| 可用空間 | 40 GB | **80 GB 以上**（Docker 映像 + Steam 伺服器檔案 + 世界 + 一份備份） |
+| 網路 | 千兆區域網路 | 千兆區域網路；網際網路聯機再保證穩定上傳 |
+
+32 GB 以上時，可把 Minecraft 記憶體降到 `12G` 後與 Terraria 長期同開，或把 Project Zomboid 調到 8 GB。即便記憶體充裕，也不要同時運行兩個大型伺服器（Minecraft、Palworld、Project Zomboid 不要疊開）。
+
+### 各遊戲資源占用
+
+下表為家庭 2–10 人、使用本倉庫預設人數時的經驗值。磁碟會隨世界、模組和備份增長；每個遊戲只保留最新一份備份。
+
+| | 網頁總控 | Minecraft Java（NeoForge） | Palworld | Terraria（TShock） | Project Zomboid（Build 42） |
+| --- | --- | --- | --- | --- | --- |
+| 運行記憶體 | 約 100–300 MB | 約 12–16 GB | 約 8–16 GB | 約 0.5–2 GB | 約 5–9 GB |
+| 本倉庫預設 | 常駐 | `MEMORY=14G` | 不限制容器上限，隨玩家和建築上漲 | 8 人、中型世界約 1 GB | `PZ_MAX_RAM=6144m`（Java 堆 6 GB，可選 4 / 6 / 8 GB） |
+| 首次磁碟 | 映像約 0.2–0.5 GB | 映像 1–2 GB；伺服器 + 模組約 2–5 GB | Steam 伺服器約 12–20 GB | 映像約 0.5–1 GB | Steam 伺服器約 10–15 GB |
+| 日常磁碟 | 可忽略 | 世界常見 2–10 GB+ | 世界約 1–5 GB | 世界 50–400 MB | 存檔約 2–10 GB，Workshop 模組另計 |
+| CPU | 很低 | 2–4 核，模組越多越吃單核 | 4 核以上 | 1–2 核 | 4 核，偏單核 |
+| 預設人數 | — | 10 | 16 | 8 | 8 |
+| 20 GB NAS | 始終可開 | 獨占大型伺服器；可順便開 Terraria（建議把記憶體降到 `12G`） | 獨占大型伺服器；可順便開 Terraria | 可與任意一個大型伺服器同開 | 獨占大型伺服器；可順便開 Terraria |
+
+**20 GB 記憶體 NAS 同時運行建議：**
+
+- 可以：總控 + 任意一個大型伺服器 + Terraria
+- 不要：Minecraft + Palworld；Minecraft + Project Zomboid；Palworld + Project Zomboid；三個大型伺服器一起開
+
+記憶體不夠時，DSM 會開始使用交換空間或直接殺掉容器，表現為卡頓、存檔損壞或容器反覆重啟。換遊戲前請先在網頁停止目前的大型伺服器。
+
+Minecraft 若同時跑其他高記憶體套件，把 `.env` 的 `MEMORY` 從 `14G` 降到 `12G`。Palworld 官方建議 16 GB，8 GB 能啟動但容易記憶體不足。Project Zomboid 首次啟動會下載伺服器檔案，網頁裡可把 Java 記憶體改成 4 / 6 / 8 GB。
+
 ## Synology 部署
 
 1. 將整個目錄上傳到 `/volume1/docker/nas_game_server`。若使用其他路徑，請同步修改 `.env` 的 `HOST_PROJECT_PATH`。
-2. 開啟 `.env`，確認管理帳號、`EULA=TRUE`、記憶體、連接埠和 Minecraft 參數。預設帳號為 `admin`，密碼為 `admin123`。
+2. 開啟 `.env`，確認管理帳號、`EULA=TRUE`、記憶體、連接埠和 Minecraft 參數。預設帳號為 `admin`，密碼為 `admin123`。記憶體與磁碟占用見上文「建議配置」。
 3. 若舊的 `minecraft-neoforge` 專案仍在運行，先備份並確認世界位於 `minecraft/data`，再停止並刪除舊容器。舊版 `minecraft-backup` 容器也可刪除。只刪除容器，不要刪除資料或 `minecraft/data`、`mods`、`installer`、`backups` 目錄。
 4. 開啟 **Container Manager → 專案 → 新增**，專案名稱填寫 `nas-game-server`，選擇根目錄並使用其中的 `compose.yaml`。
 5. 建置並啟動專案，此時只會運行 `nas-game-controller`。
@@ -83,7 +122,7 @@ CONTROL_ACCOUNTS_JSON={"admin":"改成高強度密碼","family":"另一個密碼
 - Palworld 支援伺服器資訊、世界狀態、玩家資訊、踢出、封鎖、公告、儲存和備份。
 - Terraria 使用 TShock，遊戲連接埠為 TCP `7777`；管理連接埠 `7878` 只綁定 NAS 本機，請勿轉送。
 - Project Zomboid 使用 Build 42 與 RCON。網際網路連線需放行 UDP `16261`–`16263`；RCON TCP `27016` 只綁定 NAS 本機。
-- Palworld 與 Project Zomboid 需要較多記憶體。20 GB NAS 建議按需單獨運行大型伺服器，避免同時啟動 Minecraft、Palworld 和 Project Zomboid。
+- 記憶體、磁碟和同時運行限制見上文「建議配置」。網頁遊戲卡片也會顯示即時 CPU、記憶體和目錄大小。
 
 ## 註冊其他遊戲
 
