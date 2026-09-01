@@ -150,7 +150,9 @@
           <div id="logOperationStatus" class="log-operation" role="status" aria-live="polite">
             <span data-i18n="正在读取操作状态">正在读取操作状态</span>
           </div>
-          <pre id="logOutput" class="log-output" tabindex="0" data-i18n="正在读取日志…">正在读取日志…</pre>
+          <div id="logOutput" class="log-output" tabindex="0" aria-live="polite">
+            <p class="log-empty" data-i18n="正在读取日志…">正在读取日志…</p>
+          </div>
           <p class="log-note" data-i18n="显示所选游戏的总控进度和容器最近 500 行日志，每 2 秒自动刷新。">显示所选游戏的总控进度和容器最近 500 行日志，每 2 秒自动刷新。</p>
         </div>
       </dialog>

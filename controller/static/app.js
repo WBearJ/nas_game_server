@@ -269,18 +269,41 @@ function setMetricValue(root, key, value) {
   if (node && node.textContent !== value) node.textContent = value;
 }
 
-function gameErrorText(game) {
-  if (activeOperation.running && activeOperation.gameId === game.id) return "";
-  return String(game.error || "").trim();
+function gameFeedback(game) {
+  if (activeOperation.running && activeOperation.gameId === game.id) {
+    return {
+      kind: "activity",
+      text: String(activeOperation.latestLog || activeOperation.message || "").trim()
+    };
+  }
+  const error = String(game.error || "").trim();
+  return error ? { kind: "error", text: error } : null;
 }
 
-function syncGameError(card, game) {
-  const text = gameErrorText(game);
-  const node = card.querySelector(".game-error");
+function syncGameFeedback(card, game) {
+  const feedback = gameFeedback(game);
+  const node = card.querySelector(".game-feedback");
   if (!node) return;
-  node.hidden = !text;
-  node.textContent = text ? tt(text) : "";
-  card.classList.toggle("has-error", Boolean(text));
+  node.hidden = !feedback;
+  node.classList.toggle("is-error", feedback?.kind === "error");
+  node.classList.toggle("is-activity", feedback?.kind === "activity");
+  card.classList.toggle("has-error", feedback?.kind === "error");
+  card.classList.toggle("has-activity", feedback?.kind === "activity");
+  if (!feedback) {
+    node.replaceChildren();
+    node.removeAttribute("role");
+    return;
+  }
+  node.setAttribute("role", feedback.kind === "error" ? "alert" : "status");
+  const message = createElement("p", "game-feedback-message", feedback.text);
+  if (feedback.kind === "error") {
+    const logs = createElement("button", "game-log-button", "查看日志");
+    logs.type = "button";
+    logs.addEventListener("click", () => openLogs(game.id));
+    node.replaceChildren(message, logs);
+  } else {
+    node.replaceChildren(message);
+  }
 }
 
 function actionButton(label, action, game, secondary = false) {
@@ -386,11 +409,10 @@ function renderGame(game) {
   const actions = createElement("div", "game-actions");
   renderGameActions(actions, game);
   actions.dataset.signature = `${game.state}:${Boolean(activeOperation.running)}`;
-  const error = createElement("p", "game-error");
-  error.setAttribute("role", "alert");
-  content.append(head, metrics, actions, error);
+  const feedback = createElement("div", "game-feedback");
+  content.append(head, metrics, actions, feedback);
   card.append(visual, content);
-  syncGameError(card, game);
+  syncGameFeedback(card, game);
   return card;
 }
 
@@ -415,7 +437,7 @@ function updateGameCard(card, game) {
     "pink"
   );
   setMetricValue(card, "disk", formatBytes(game.metrics?.diskBytes));
-  syncGameError(card, game);
+  syncGameFeedback(card, game);
   const actions = card.querySelector(".game-actions");
   const signature = `${game.state}:${Boolean(activeOperation.running)}`;
   if (actions?.dataset.signature !== signature) {
@@ -464,9 +486,6 @@ function render(payload) {
     }
   }
   lastUpdated.textContent = tt(`更新于 ${clockFormatter.format(new Date())}`);
-  if (activeOperation.running) {
-    setMessage(`${tt(activeOperation.message)}。可点击顶部“日志”查看详情。`);
-  }
 }
 
 function renderCatalogGame(game) {
@@ -1781,21 +1800,19 @@ async function deleteGame(game) {
 async function runAction(gameId, action, label) {
   if (activeOperation.running) {
     setMessage(`正在执行：${activeOperation.message}`, true);
-    openLogs(activeGameId === gameId ? gameId : null);
     return;
   }
   busyGame = gameId;
-  setMessage(`正在${label}服务，请稍候`);
+  setMessage("");
   await loadGames({ quiet: true });
   try {
     const payload = await api(`/api/games/${gameId}/${action}`, { method: "POST" });
     activeOperation = payload.operation;
-    setMessage(`${payload.operation.message}。日志窗口会持续显示进度。`);
-    openLogs(activeGameId === gameId ? gameId : null);
+    setMessage("");
+    await loadGames({ quiet: true });
     await monitorAction(gameId, label);
   } catch (error) {
     setMessage(error.message, true);
-    if (error.status === 409) openLogs(activeGameId === gameId ? gameId : null);
     busyGame = null;
     await loadGames({ quiet: true });
   }
@@ -1814,7 +1831,7 @@ async function monitorAction(gameId, label) {
     if (operation.running && operation.gameId === gameId) continue;
     busyGame = null;
     if (operation.error) {
-      setMessage(`${label}失败：${operation.error}`, true);
+      setMessage("");
     } else {
       setMessage(operation.message || `${label}操作已完成`);
     }
@@ -1859,31 +1876,63 @@ function renderLogs(payload) {
   logOperationStatus.classList.toggle("is-error", operationMatches && Boolean(operation.error));
   logsButton.classList.toggle("has-activity", Boolean(operation.running));
 
-  const sections = [];
   const controllerEntries = (payload.controller || []).filter(
     (entry) => !selectedGameId || entry.source === selectedGameId
   );
-  const controllerLines = controllerEntries.map((entry) => {
-    const level = entry.level === "error" ? "ERROR" : "INFO";
-    return `[${formatLogTimestamp(entry.timestamp)}] [${level}] [${entry.source}] ${tt(entry.message)}`;
-  });
   const controllerTitle = selectedGame ? tt(`${selectedGame.name} · 总控操作日志`) : tt("全部 · 总控操作日志");
-  sections.push(`===== ${controllerTitle} =====\n${controllerLines.join("\n") || t("暂无操作记录")}`);
-
   const containers = (payload.containers || []).filter(
     (container) => !selectedGameId || container.gameId === selectedGameId
   );
+  const signature = JSON.stringify({ controllerEntries, containers, selectedGameId });
+  if (signature === lastRenderedLogs) return;
+  const nearBottom = logOutput.scrollHeight - logOutput.scrollTop - logOutput.clientHeight < 60;
+
+  const sections = [];
+  const controllerSection = createElement("section", "log-section");
+  const controllerHeader = createElement("header", "log-section-header");
+  controllerHeader.append(createElement("h3", "", controllerTitle), createElement("span", "log-section-kind", "Controller"));
+  const controllerBody = createElement("div", "log-rows");
+  if (controllerEntries.length) {
+    for (const entry of controllerEntries) {
+      const row = createElement("div", `log-row${entry.level === "error" ? " is-error" : ""}`);
+      const timestamp = formatLogTimestamp(entry.timestamp);
+      const time = createElement("time", "log-time", timestamp.slice(-8));
+      time.dateTime = entry.timestamp || "";
+      time.title = timestamp;
+      row.append(
+        time,
+        createElement("span", "log-level", entry.level === "error" ? "ERROR" : "INFO"),
+        createElement("span", "log-source", entry.source),
+        createElement("span", "log-message", entry.message)
+      );
+      controllerBody.append(row);
+    }
+  } else {
+    controllerBody.append(createElement("p", "log-empty", "暂无操作记录"));
+  }
+  controllerSection.append(controllerHeader, controllerBody);
+  sections.push(controllerSection);
+
   for (const container of containers) {
-    sections.push(
-      `===== ${container.gameName || container.gameId} / ${container.name} · ${stateLabels[container.state] || container.state} =====\n${container.logs?.trim() || t("容器当前没有输出")}`
+    const section = createElement("section", "log-section");
+    const header = createElement("header", "log-section-header");
+    header.append(
+      createElement("h3", "", `${container.gameName || container.gameId} / ${container.name}`),
+      createElement("span", "log-state", stateLabels[container.state] || container.state)
     );
+    const stream = createElement("div", "log-stream");
+    const lines = String(container.logs || "").trim().split("\n").filter(Boolean);
+    if (lines.length) {
+      for (const line of lines) stream.append(createElement("div", "log-line", line));
+    } else {
+      stream.append(createElement("p", "log-empty", "容器当前没有输出"));
+    }
+    section.append(header, stream);
+    sections.push(section);
   }
 
-  const nextLogs = sections.join("\n\n");
-  if (nextLogs === lastRenderedLogs) return;
-  const nearBottom = logOutput.scrollHeight - logOutput.scrollTop - logOutput.clientHeight < 60;
-  logOutput.textContent = nextLogs;
-  lastRenderedLogs = nextLogs;
+  logOutput.replaceChildren(...sections);
+  lastRenderedLogs = signature;
   if (nearBottom) logOutput.scrollTop = logOutput.scrollHeight;
 }
 

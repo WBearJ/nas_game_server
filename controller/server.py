@@ -141,11 +141,15 @@ def record_log(message, source="controller", level="info"):
     }
     with STATE_LOCK:
         EVENT_LOG.append(entry)
+        if OPERATION.get("running") and OPERATION.get("gameId") == source:
+            OPERATION["latestLog"] = entry["message"]
     print(f"[{entry['source']}] {entry['message']}", flush=True)
 
 
 def update_operation(**changes):
     with STATE_LOCK:
+        if changes.get("running") is True and "startedAt" in changes:
+            changes.setdefault("latestLog", changes.get("message", ""))
         OPERATION.update(changes)
         return dict(OPERATION)
 

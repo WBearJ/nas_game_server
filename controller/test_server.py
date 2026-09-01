@@ -689,6 +689,26 @@ class ControllerTests(unittest.TestCase):
         SERVER.clear_game_error(game["id"])
         self.assertEqual(SERVER.public_game(game)["error"], "")
 
+    def test_running_operation_tracks_latest_game_log(self):
+        original_operation = dict(SERVER.OPERATION)
+        try:
+            operation = SERVER.update_operation(
+                running=True,
+                gameId="minecraft",
+                message="准备启动 Minecraft",
+                startedAt=SERVER.now_iso(),
+                error=None
+            )
+            self.assertEqual(operation["latestLog"], "准备启动 Minecraft")
+            SERVER.record_log("容器启动指令已发送", "minecraft")
+            self.assertEqual(SERVER.operation_snapshot()["latestLog"], "容器启动指令已发送")
+            SERVER.record_log("无关日志", "controller")
+            self.assertEqual(SERVER.operation_snapshot()["latestLog"], "容器启动指令已发送")
+        finally:
+            with SERVER.STATE_LOCK:
+                SERVER.OPERATION.clear()
+                SERVER.OPERATION.update(original_operation)
+
     def test_action_worker_stores_and_clears_start_error(self):
         game = copy.deepcopy(next(item for item in SERVER.GAMES if item["id"] == "minecraft"))
         SERVER.DOCKER = FakeDocker()

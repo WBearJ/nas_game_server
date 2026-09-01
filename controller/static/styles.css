@@ -426,26 +426,24 @@ button:disabled {
 }
 
 .log-dialog {
-  width: min(1100px, calc(100% - 32px));
-  height: min(760px, calc(100% - 32px));
+  width: min(1040px, calc(100% - 40px));
+  height: min(780px, calc(100% - 40px));
   max-width: none;
   max-height: none;
   padding: 0;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 28px;
+  border: 1px solid #d8d8dc;
+  border-radius: 6px;
   outline: none;
-  background: rgba(8, 7, 19, 0.92);
-  color: var(--text);
-  box-shadow: 0 50px 150px rgba(0, 0, 0, 0.72), inset 0 1px 0 rgba(255, 255, 255, 0.14);
-  backdrop-filter: blur(16px) saturate(130%);
-  -webkit-backdrop-filter: blur(16px) saturate(130%);
+  background: #f7f7f8;
+  color: #17171a;
+  box-shadow: 0 32px 90px rgba(0, 0, 0, 0.42);
 }
 
 .log-dialog::backdrop {
-  background: rgba(3, 2, 10, 0.72);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: rgba(3, 2, 10, 0.76);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
 }
 
 .upload-dialog {
@@ -574,8 +572,7 @@ button:disabled {
   height: 100%;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
-  gap: 14px;
-  padding: 24px;
+  gap: 0;
 }
 
 .log-header {
@@ -583,12 +580,20 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 24px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid #d8d8dc;
+  background: #ffffff;
+}
+
+.log-header .eyebrow {
+  color: #e4002b;
 }
 
 .log-header h2 {
-  margin: 5px 0 0;
-  font-size: 30px;
-  letter-spacing: -0.04em;
+  margin: 4px 0 0;
+  color: #17171a;
+  font-size: 28px;
+  letter-spacing: -0.045em;
 }
 
 .log-actions {
@@ -602,72 +607,186 @@ button:disabled {
   align-items: center;
   gap: 7px;
   margin-right: 5px;
-  color: var(--muted);
+  color: #6d6d74;
   font-size: 11px;
 }
 
 .log-filter select {
   min-width: 132px;
   height: 36px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 999px;
+  border: 1px solid #c8c8cd;
+  border-radius: 3px;
   outline: none;
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--white);
+  background: #ffffff;
+  color: #17171a;
   padding: 0 30px 0 12px;
   font: inherit;
   font-size: 12px;
 }
 
 .log-filter select:focus {
-  border-color: rgba(0, 240, 255, 0.58);
-  box-shadow: 0 0 16px rgba(0, 240, 255, 0.14);
+  border-color: #e4002b;
+  box-shadow: 0 0 0 3px rgba(228, 0, 43, 0.1);
+}
+
+.log-dialog .text-button {
+  border-radius: 3px;
+  color: #4a4a50;
+}
+
+.log-dialog .text-button:hover,
+.log-dialog .text-button:focus-visible {
+  background: #ededf0;
+  color: #17171a;
 }
 
 .log-operation {
-  min-height: 44px;
+  min-height: 46px;
   display: flex;
   align-items: center;
-  padding: 0 15px;
-  border: 1px solid rgba(0, 240, 255, 0.16);
-  border-radius: 14px;
-  background: rgba(0, 240, 255, 0.07);
-  color: rgba(255, 255, 255, 0.82);
+  padding: 0 24px;
+  border-bottom: 1px solid #d8d8dc;
+  background: #f0f0f2;
+  color: #44444a;
   font-size: 13px;
 }
 
 .log-operation.is-error {
-  border-color: rgba(255, 0, 110, 0.3);
-  background: rgba(255, 0, 110, 0.1);
-  color: #ffd0e3;
+  border-color: #e6a8b3;
+  background: #fff0f3;
+  color: #a3001f;
 }
 
 .log-output {
   min-height: 0;
   margin: 0;
-  padding: 18px;
+  padding: 20px 24px 28px;
   overflow: auto;
-  border: 1px solid rgba(255, 255, 255, 0.11);
-  border-radius: 18px;
   outline: none;
-  background: #000000;
-  color: #d7f9ff;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  background: #f7f7f8;
+  color: #252529;
+  font-family: var(--font);
   font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  tab-size: 2;
+  line-height: 1.5;
 }
 
 .log-output:focus-visible {
-  border-color: rgba(0, 240, 255, 0.46);
-  box-shadow: 0 0 0 4px rgba(0, 240, 255, 0.08);
+  box-shadow: inset 0 0 0 3px rgba(228, 0, 43, 0.16);
+}
+
+.log-section {
+  border: 1px solid #d8d8dc;
+  background: #ffffff;
+}
+
+.log-section + .log-section {
+  margin-top: 16px;
+}
+
+.log-section-header {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #d8d8dc;
+  background: #f0f0f2;
+}
+
+.log-section-header h3 {
+  min-width: 0;
+  margin: 0;
+  color: #17171a;
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.log-section-kind,
+.log-state {
+  flex: none;
+  color: #6d6d74;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.log-rows,
+.log-stream {
+  display: grid;
+}
+
+.log-row {
+  display: grid;
+  grid-template-columns: 68px 48px minmax(78px, 0.25fr) minmax(0, 1fr);
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid #ededf0;
+  align-items: baseline;
+}
+
+.log-row:last-child,
+.log-line:last-child {
+  border-bottom: 0;
+}
+
+.log-row.is-error {
+  background: #fff4f6;
+}
+
+.log-time,
+.log-level,
+.log-source {
+  color: #77777e;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.log-level {
+  color: #00644b;
+  font-weight: 750;
+}
+
+.log-row.is-error .log-level {
+  color: #c00024;
+}
+
+.log-source {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-message,
+.log-line {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.log-line {
+  padding: 7px 12px;
+  border-bottom: 1px solid #ededf0;
+  color: #343439;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.log-empty {
+  margin: 0;
+  padding: 18px 14px;
+  color: #77777e;
 }
 
 .log-note {
-  margin: 0 4px;
-  color: rgba(255, 255, 255, 0.42);
+  margin: 0;
+  padding: 12px 24px;
+  border-top: 1px solid #d8d8dc;
+  background: #ffffff;
+  color: #77777e;
   font-size: 11px;
 }
 
@@ -1202,21 +1321,58 @@ button:disabled {
   margin: 0;
 }
 
-.game-error {
+.game-feedback {
   grid-column: 1 / -1;
-  margin: 0;
-  padding: 8px 10px;
-  border: 1px solid rgba(255, 80, 110, 0.38);
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 9px 8px 11px;
+  border: 1px solid rgba(0, 240, 255, 0.24);
   border-radius: 10px;
-  background: rgba(255, 40, 80, 0.16);
-  color: #ffd0dc;
+  background: rgba(0, 240, 255, 0.08);
+  color: rgba(255, 255, 255, 0.84);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.game-feedback.is-error {
+  border: 1px solid rgba(255, 80, 110, 0.38);
+  background: rgba(255, 40, 80, 0.16);
+  color: #ffd0dc;
+}
+
+.game-feedback-message {
+  min-width: 0;
+  margin: 0;
   overflow-wrap: anywhere;
+}
+
+.game-log-button {
+  flex: none;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid rgba(255, 208, 220, 0.38);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.game-log-button:hover,
+.game-log-button:focus-visible {
+  border-color: rgba(255, 255, 255, 0.66);
+  background: rgba(255, 255, 255, 0.16);
 }
 
 .game-card.has-error {
   border-color: rgba(255, 80, 110, 0.45);
+}
+
+.game-card.has-activity {
+  border-color: rgba(0, 240, 255, 0.3);
 }
 
 .action-button {
@@ -2110,7 +2266,7 @@ footer p {
   .log-dialog {
     width: calc(100% - 16px);
     height: calc(100% - 16px);
-    border-radius: 22px;
+    border-radius: 4px;
   }
 
   .upload-dialog {
@@ -2119,7 +2275,7 @@ footer p {
   }
 
   .log-shell {
-    padding: 17px;
+    padding: 0;
   }
 
   .log-header h2 {
@@ -2130,6 +2286,7 @@ footer p {
     align-items: flex-start;
     flex-direction: column;
     gap: 10px;
+    padding: 16px;
   }
 
   .log-actions {
@@ -2143,6 +2300,27 @@ footer p {
   .log-filter select {
     min-width: 0;
     flex: 1;
+  }
+
+  .log-operation {
+    padding: 10px 16px;
+  }
+
+  .log-output {
+    padding: 14px 12px 20px;
+  }
+
+  .log-note {
+    padding: 10px 16px;
+  }
+
+  .log-row {
+    grid-template-columns: 56px 44px minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .log-message {
+    grid-column: 1 / -1;
   }
 
   .section-heading {
