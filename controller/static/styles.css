@@ -118,6 +118,10 @@ button:disabled {
   display: none !important;
 }
 
+.session-pending #loginView {
+  display: none !important;
+}
+
 .aurora {
   position: fixed;
   z-index: -1;

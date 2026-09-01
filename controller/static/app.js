@@ -119,6 +119,7 @@ async function api(path, options = {}) {
 function setView(authenticated) {
   loginView.hidden = authenticated;
   dashboardView.hidden = !authenticated;
+  document.documentElement.classList.remove("session-pending");
   if (!authenticated && pollTimer) {
     window.clearInterval(pollTimer);
     pollTimer = null;
