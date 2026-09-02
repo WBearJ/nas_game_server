@@ -154,6 +154,20 @@ class ControllerTests(unittest.TestCase):
         )
         self.assertEqual(SERVER.DockerClient.decode_output(payload), "helloworld")
 
+    def test_http_handler_uses_keep_alive_and_short_static_cache(self):
+        self.assertEqual(SERVER.Handler.protocol_version, "HTTP/1.1")
+        handler = object.__new__(SERVER.Handler)
+        handler.send_response = mock.Mock()
+        handler._headers = mock.Mock()
+        handler.end_headers = mock.Mock()
+        handler.wfile = io.BytesIO()
+
+        handler.serve_static("/session-bootstrap.js")
+
+        handler.send_response.assert_called_once_with(200)
+        self.assertEqual(handler._headers.call_args.kwargs["cache_control"], "public, max-age=300")
+        self.assertIn(b"gameControlSession", handler.wfile.getvalue())
+
     def test_container_stats_calculation(self):
         client = SERVER.DockerClient("unused")
         client.inspect = lambda _name: {"State": {"Status": "running"}}
@@ -205,6 +219,24 @@ class ControllerTests(unittest.TestCase):
         with mock.patch.object(SERVER.time, "monotonic_ns", side_effect=[1000000000, 2000000000]):
             self.assertEqual(client.stats("minecraft")["cpuPercent"], 0.0)
             self.assertEqual(client.stats("minecraft")["cpuPercent"], 100.0)
+
+    def test_container_stats_can_reuse_known_running_state(self):
+        client = SERVER.DockerClient("unused")
+        client.inspect = mock.Mock(side_effect=AssertionError("unexpected duplicate inspect"))
+        client._request = lambda *_args, **_kwargs: {
+            "cpu_stats": {
+                "cpu_usage": {"total_usage": 300},
+                "system_cpu_usage": 2000,
+                "online_cpus": 2
+            },
+            "precpu_stats": {
+                "cpu_usage": {"total_usage": 200},
+                "system_cpu_usage": 1000
+            },
+            "memory_stats": {"usage": 1000, "limit": 2000, "stats": {}}
+        }
+        self.assertEqual(client.stats("minecraft", known_running=True)["cpuPercent"], 20.0)
+        client.inspect.assert_not_called()
 
     def test_container_create_publishes_only_declared_udp_ports(self):
         client = SERVER.DockerClient("unused")
@@ -271,6 +303,30 @@ class ControllerTests(unittest.TestCase):
         self.assertIn("zomboid", game_ids)
         palworld = next(item for item in payload["containers"] if item["gameId"] == "palworld")
         self.assertIn("首次点击启动", palworld["logs"])
+
+    def test_recent_logs_reuses_container_inspection(self):
+        class RunningDocker:
+            def __init__(self):
+                self.inspections = {}
+
+            def inspect(self, name):
+                self.inspections[name] = self.inspections.get(name, 0) + 1
+                return {"State": {"Status": "running"}, "Config": {"Tty": False}}
+
+            def logs(self, name, _tail, info=None):
+                self.assert_info(info)
+                return f"{name} output"
+
+            @staticmethod
+            def assert_info(info):
+                if not info or info.get("State", {}).get("Status") != "running":
+                    raise AssertionError("container inspection was not reused")
+
+        docker = RunningDocker()
+        SERVER.DOCKER = docker
+        payload = SERVER.recent_logs(20)
+        self.assertTrue(payload["containers"])
+        self.assertTrue(all(count == 1 for count in docker.inspections.values()))
 
     def test_extract_json_output_ignores_log_prefix(self):
         payload = SERVER.extract_json_output("rest-cli: connected\n{\"players\":[]}")

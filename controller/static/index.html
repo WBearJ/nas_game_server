@@ -5,15 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light">
     <title>游戏服务器总控</title>
-    <script>
-      try {
-        if (sessionStorage.getItem("gameControlSession")) {
-          document.documentElement.classList.add("session-pending");
-        }
-      } catch (_error) {
-        // Storage can be unavailable in privacy-restricted browsing contexts.
-      }
-    </script>
+    <script src="./session-bootstrap.js"></script>
     <link rel="icon" href="./assets/minecraft-java.png" type="image/png">
     <link rel="stylesheet" href="./styles.css">
   </head>

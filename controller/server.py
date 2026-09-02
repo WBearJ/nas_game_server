@@ -42,6 +42,7 @@ ZOMBOID_DETAIL_CACHE = {}
 SESSIONS = {}
 LOGIN_FAILURES = {}
 SESSION_TTL_SECONDS = int(os.environ.get("CONTROL_SESSION_TTL_SECONDS", "43200"))
+RUNTIME_METRICS_TTL_SECONDS = float(os.environ.get("CONTROL_METRICS_TTL_SECONDS", "5"))
 LOGIN_WINDOW_SECONDS = 300
 LOGIN_MAX_FAILURES = 5
 MAX_MOD_UPLOAD_BYTES = 512 * 1024 * 1024
@@ -433,8 +434,8 @@ class DockerClient:
     def remove(self, name):
         self._request("DELETE", f"/containers/{quote(name, safe='')}?v=0&force=0")
 
-    def logs(self, name, tail=500):
-        info = self.inspect(name)
+    def logs(self, name, tail=500, info=None):
+        info = info if info is not None else self.inspect(name)
         if info is None:
             return ""
         raw = self._request(
@@ -463,10 +464,11 @@ class DockerClient:
             chunks.append(raw[position:])
         return b"".join(chunks).decode("utf-8", errors="replace")
 
-    def stats(self, name):
-        info = self.inspect(name)
-        if info is None or info.get("State", {}).get("Status") != "running":
-            return None
+    def stats(self, name, known_running=False):
+        if not known_running:
+            info = self.inspect(name)
+            if info is None or info.get("State", {}).get("Status") != "running":
+                return None
         stats = self._request(
             "GET",
             f"/containers/{quote(name, safe='')}/stats?stream=false&one-shot=true",
@@ -1114,6 +1116,14 @@ def public_game(game):
     }
 
 
+def public_games(games):
+    games = list(games)
+    if len(games) < 2:
+        return [public_game(game) for game in games]
+    with ThreadPoolExecutor(max_workers=min(4, len(games))) as pool:
+        return list(pool.map(public_game, games))
+
+
 def directory_size(path):
     total = 0
     if not path.exists():
@@ -1159,7 +1169,7 @@ def game_metrics(game, containers=None):
     now = time.monotonic()
     with STATE_LOCK:
         cached = RUNTIME_METRICS_CACHE.get(game["id"])
-        if cached and now - cached["time"] < 2:
+        if cached and now - cached["time"] < RUNTIME_METRICS_TTL_SECONDS:
             return dict(cached["metrics"])
     containers = containers or [container_state(spec) for spec in game.get("containers", [])]
     cpu = 0.0
@@ -1171,7 +1181,7 @@ def game_metrics(game, containers=None):
         if item.get("state") != "running":
             continue
         try:
-            stats = DOCKER.stats(item["name"])
+            stats = DOCKER.stats(item["name"], known_running=True)
         except DockerError:
             stats = None
         if stats:
@@ -2594,7 +2604,7 @@ def recent_logs(tail):
     with STATE_LOCK:
         controller = list(EVENT_LOG)[-tail:]
     operation = operation_snapshot()
-    containers = []
+    targets = []
     seen = set()
     for game in GAMES:
         for spec in game.get("containers", []):
@@ -2602,39 +2612,44 @@ def recent_logs(tail):
             if name in seen:
                 continue
             seen.add(name)
-            try:
-                info = DOCKER.inspect(name)
-                if info is None:
-                    waiting = operation.get("running") and operation.get("gameId") == game["id"]
-                    message = (
-                        "容器尚未创建。总控正在执行首次部署，请查看上方操作日志中的目录、镜像下载和创建进度。"
-                        if waiting else
-                        "容器尚未创建；首次点击启动后，总控会自动下载镜像并创建容器。"
-                    )
-                    containers.append({
-                        "name": name,
-                        "gameId": game["id"],
-                        "gameName": game["name"],
-                        "state": "missing",
-                        "logs": message
-                    })
-                    continue
-                state = info.get("State", {}).get("Status", "unknown")
-                containers.append({
+            targets.append((game, name))
+
+    def read_container_log(target):
+        game, name = target
+        try:
+            info = DOCKER.inspect(name)
+            if info is None:
+                waiting = operation.get("running") and operation.get("gameId") == game["id"]
+                message = (
+                    "容器尚未创建。总控正在执行首次部署，请查看上方操作日志中的目录、镜像下载和创建进度。"
+                    if waiting else
+                    "容器尚未创建；首次点击启动后，总控会自动下载镜像并创建容器。"
+                )
+                return {
                     "name": name,
                     "gameId": game["id"],
                     "gameName": game["name"],
-                    "state": state,
-                    "logs": DOCKER.logs(name, tail)
-                })
-            except DockerError as exc:
-                containers.append({
-                    "name": name,
-                    "gameId": game["id"],
-                    "gameName": game["name"],
-                    "state": "error",
-                    "logs": f"读取日志失败：{exc}"
-                })
+                    "state": "missing",
+                    "logs": message
+                }
+            return {
+                "name": name,
+                "gameId": game["id"],
+                "gameName": game["name"],
+                "state": info.get("State", {}).get("Status", "unknown"),
+                "logs": DOCKER.logs(name, tail, info=info)
+            }
+        except DockerError as exc:
+            return {
+                "name": name,
+                "gameId": game["id"],
+                "gameName": game["name"],
+                "state": "error",
+                "logs": f"读取日志失败：{exc}"
+            }
+
+    with ThreadPoolExecutor(max_workers=min(4, len(targets) or 1)) as pool:
+        containers = list(pool.map(read_container_log, targets))
     return {
         "operation": operation,
         "controller": controller,
@@ -2734,15 +2749,16 @@ def backup_scheduler():
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "GameControl/1.0"
+    protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt, *args):
         print(f"{self.address_string()} - {fmt % args}", flush=True)
 
-    def _headers(self, content_type="application/json; charset=utf-8", length=None):
+    def _headers(self, content_type="application/json; charset=utf-8", length=None, cache_control="no-store"):
         self.send_header("Content-Type", content_type)
         if length is not None:
             self.send_header("Content-Length", str(length))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache_control)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
@@ -2823,7 +2839,8 @@ class Handler(BaseHTTPRequestHandler):
         }.get(candidate.suffix, "application/octet-stream")
         body = candidate.read_bytes()
         self.send_response(200)
-        self._headers(mime, len(body))
+        cache_control = "no-cache" if candidate.name == "index.html" else "public, max-age=300"
+        self._headers(mime, len(body), cache_control=cache_control)
         self.end_headers()
         self.wfile.write(body)
 
@@ -2843,7 +2860,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self.require_auth():
                 return
             try:
-                games = [public_game(game) for game in added_games()]
+                games = public_games(added_games())
                 self.json_response(200, {"games": games, "operation": operation_snapshot()})
             except (DockerError, RuntimeError) as exc:
                 self.json_response(503, {"error": str(exc)})
