@@ -396,6 +396,47 @@ class ControllerTests(unittest.TestCase):
             with tarfile.open(archive_path, "r:gz") as archive:
                 self.assertIn("data/world/level.dat", archive.getnames())
 
+    def test_backup_retention_rolls_and_prunes_archives(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            data = root / "minecraft/data/world"
+            data.mkdir(parents=True)
+            game = {
+                "id": "minecraft",
+                "name": "Minecraft",
+                "primary": "minecraft-neoforge",
+                "dataPath": "minecraft/data",
+                "hostDirectories": ["minecraft/data", "minecraft/backups"],
+                "backup": {
+                    "directory": "minecraft/backups",
+                    "filename": "minecraft-latest.tar.gz",
+                    "retentionCount": 2
+                },
+                "containers": [{"name": "minecraft-neoforge"}]
+            }
+            SERVER.HOST_PROJECT_MOUNT = root
+            SERVER.DOCKER = FakeDocker()
+            for revision in range(3):
+                (data / "level.dat").write_bytes(f"world-{revision}".encode())
+                SERVER.create_backup(game)
+                time.sleep(0.01)
+
+            archives = SERVER.backup_archive_paths(game)
+            self.assertEqual(len(archives), 2)
+            self.assertEqual(archives[0].name, "minecraft-latest.tar.gz")
+            self.assertEqual(SERVER.backup_info(game)["archiveCount"], 2)
+
+    def test_backup_settings_enforce_safe_limits(self):
+        game = {"backup": {"directory": "backups"}}
+        self.assertEqual(
+            SERVER.validate_backup_settings(game, {"retentionCount": 5, "intervalHours": 24}),
+            {"retentionCount": 5, "intervalSeconds": 86400}
+        )
+        with self.assertRaises(SERVER.DockerError):
+            SERVER.validate_backup_settings(game, {"retentionCount": 5, "intervalHours": 0})
+        with self.assertRaises(SERVER.DockerError):
+            SERVER.validate_backup_settings(game, {"retentionCount": 31, "intervalHours": 24})
+
     def test_player_action_rejects_invalid_name(self):
         with self.assertRaises(SERVER.DockerError):
             SERVER.run_player_action({}, "bad name", "kick")

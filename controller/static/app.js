@@ -58,6 +58,7 @@ let activeOperation = { running: false };
 let activeGameId = null;
 let modBusy = false;
 let settingsBusy = false;
+let backupSettingsBusy = false;
 let activeDetailGame = null;
 let detailRenderSignature = "";
 let lastDetailRefresh = 0;
@@ -978,7 +979,8 @@ function getDetailSignature(game) {
       action: activeOperation.action
     },
     modBusy,
-    settingsBusy
+    settingsBusy,
+    backupSettingsBusy
   });
 }
 
@@ -1525,19 +1527,47 @@ function renderDetail(game) {
   announceForm.append(announceInput, announceButton);
   announcePanel.append(announceHeading, announceForm);
 
-  const backupPanel = createElement("section", "detail-panel glass-panel");
-  const backupHeading = createElement("div", "panel-heading");
-  backupHeading.append(createElement("div", "", ""));
-  backupHeading.firstChild.append(createElement("p", "eyebrow", "备份"), createElement("h2", "", "世界快照"));
+  const backupPanel = createElement("section", "detail-panel glass-panel backup-panel");
+  const backupForm = createElement("form", "settings-form");
+  const backupHeading = createElement("div", "panel-heading settings-heading");
+  const backupTitle = document.createElement("div");
+  backupTitle.append(createElement("p", "eyebrow", "备份"), createElement("h2", "", "世界快照"));
+  const backupSave = createElement("button", "player-action", backupSettingsBusy ? "保存中" : "保存设置");
+  backupSave.type = "submit";
+  backupSave.disabled = backupSettingsBusy || Boolean(activeOperation.running);
+  backupHeading.append(backupTitle, backupSave);
   const backupFacts = createElement("dl", "detail-info");
   const backupDate = game.backup?.createdAt ? new Date(game.backup.createdAt).toLocaleString(i18n.locale) : t("尚未创建");
   backupFacts.append(
     infoRow("最近备份", backupDate),
-    infoRow("备份大小", game.backup?.exists ? formatBytes(game.backup.sizeBytes) : "—"),
-    infoRow("保留策略", "仅保留最新一份"),
-    infoRow("自动周期", "每 3 天")
+    infoRow("备份大小", game.backup?.exists ? formatBytes(game.backup.sizeBytes) : "—")
   );
-  backupPanel.append(backupHeading, backupFacts);
+  const backupFields = createElement("div", "settings-grid backup-settings-grid");
+  backupFields.append(
+    renderSettingField({
+      key: "retentionCount", label: "保留份数", type: "integer", min: 1, max: 30,
+      value: game.backup?.retentionCount ?? 1, suffix: "份", hint: "允许保留 1–30 份；调低后会立即清理超出的旧备份"
+    }),
+    renderSettingField({
+      key: "intervalHours", label: "自动周期", type: "integer", min: 1, max: 720,
+      value: Math.round((game.backup?.intervalSeconds ?? 259200) / 3600), suffix: "小时", hint: "允许 1–720 小时，最低 1 小时，避免过于频繁地压缩存档"
+    })
+  );
+  backupForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const retentionCount = backupForm.elements.retentionCount;
+    const intervalHours = backupForm.elements.intervalHours;
+    if (!retentionCount.checkValidity() || !intervalHours.checkValidity()) {
+      backupForm.reportValidity();
+      return;
+    }
+    await saveBackupSettings(game.id, {
+      retentionCount: Number(retentionCount.value),
+      intervalHours: Number(intervalHours.value)
+    });
+  });
+  backupForm.append(backupHeading, backupFacts, backupFields, createElement("p", "settings-note", "仅影响后续自动备份，无需重启游戏服务器。"));
+  backupPanel.append(backupForm);
 
   const containerPanel = createElement("section", "detail-panel glass-panel");
   const containerHeading = createElement("div", "panel-heading");
@@ -1697,6 +1727,25 @@ async function sendGameAnnouncement(gameId, message) {
     setMessage(payload.message);
   } catch (error) {
     setMessage(error.message, true);
+  }
+}
+
+async function saveBackupSettings(gameId, settings) {
+  if (backupSettingsBusy) return;
+  backupSettingsBusy = true;
+  setMessage("正在保存备份设置");
+  try {
+    const payload = await api(`/api/games/${gameId}/backup-settings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings })
+    });
+    setMessage(payload.message);
+  } catch (error) {
+    setMessage(`备份设置保存失败：${error.message}`, true);
+  } finally {
+    backupSettingsBusy = false;
+    await loadGameDetail({ quiet: true });
   }
 }
 

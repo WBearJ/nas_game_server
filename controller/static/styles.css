@@ -1931,6 +1931,10 @@ button:disabled {
   gap: 10px 12px;
 }
 
+.backup-settings-grid {
+  grid-template-columns: 1fr;
+}
+
 .setting-field {
   display: grid;
   grid-template-columns: minmax(100px, 0.8fr) minmax(150px, 1.2fr);

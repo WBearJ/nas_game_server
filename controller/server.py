@@ -46,6 +46,10 @@ RUNTIME_METRICS_TTL_SECONDS = float(os.environ.get("CONTROL_METRICS_TTL_SECONDS"
 LOGIN_WINDOW_SECONDS = 300
 LOGIN_MAX_FAILURES = 5
 MAX_MOD_UPLOAD_BYTES = 512 * 1024 * 1024
+BACKUP_RETENTION_MIN = 1
+BACKUP_RETENTION_MAX = 30
+BACKUP_INTERVAL_HOURS_MIN = 1
+BACKUP_INTERVAL_HOURS_MAX = 24 * 30
 OPERATION = {
     "running": False,
     "gameId": None,
@@ -593,11 +597,16 @@ def load_games():
                 raise RuntimeError(f"无效或重复的容器名称：{name}")
             container_names.add(name)
     apply_persisted_settings(games)
+    apply_persisted_backup_settings(games)
     return games
 
 
 def settings_store_path():
     return HOST_PROJECT_MOUNT / "config" / "game-settings.json"
+
+
+def backup_settings_store_path():
+    return HOST_PROJECT_MOUNT / "config" / "backup-settings.json"
 
 
 def game_library_store_path():
@@ -661,6 +670,17 @@ def read_settings_store():
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"无法读取网页配置：{exc}") from exc
+    return payload if isinstance(payload, dict) else {}
+
+
+def read_backup_settings_store():
+    path = backup_settings_store_path()
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"无法读取备份设置：{exc}") from exc
     return payload if isinstance(payload, dict) else {}
 
 
@@ -1056,6 +1076,29 @@ def apply_persisted_settings(games):
         apply_minecraft_runtime(game, values)
 
 
+def apply_persisted_backup_settings(games):
+    stored = read_backup_settings_store()
+    for game in games:
+        config = game.get("backup")
+        if not isinstance(config, dict):
+            continue
+        config.setdefault("retentionCount", 1)
+        config.setdefault("_defaultRetentionCount", int(config["retentionCount"]))
+        config.setdefault("_defaultIntervalSeconds", int(config.get("intervalSeconds", 259200)))
+        values = stored.get(game.get("id"), {})
+        if not isinstance(values, dict):
+            continue
+        try:
+            retention = int(values.get("retentionCount", config["retentionCount"]))
+            interval = int(values.get("intervalSeconds", config.get("intervalSeconds", 259200)))
+        except (TypeError, ValueError):
+            continue
+        if BACKUP_RETENTION_MIN <= retention <= BACKUP_RETENTION_MAX:
+            config["retentionCount"] = retention
+        if BACKUP_INTERVAL_HOURS_MIN * 3600 <= interval <= BACKUP_INTERVAL_HOURS_MAX * 3600:
+            config["intervalSeconds"] = interval
+
+
 GAMES = load_games()
 GAME_INDEX = {game["id"]: game for game in GAMES}
 DOCKER = DockerClient(DOCKER_SOCKET)
@@ -1410,16 +1453,54 @@ def minecraft_access_lists(game):
 def backup_info(game):
     config = game.get("backup") or {}
     if not config or not HOST_PROJECT_MOUNT.is_dir():
-        return {"exists": False, "sizeBytes": 0, "createdAt": None}
-    path = safe_host_path(str(Path(config["directory"]) / config["filename"]))
-    if not path.is_file():
-        return {"exists": False, "sizeBytes": 0, "createdAt": None}
+        return {"exists": False, "sizeBytes": 0, "createdAt": None, "archiveCount": 0}
+    paths = backup_archive_paths(game)
+    if not paths:
+        return {
+            "exists": False,
+            "sizeBytes": 0,
+            "createdAt": None,
+            "archiveCount": 0,
+            "retentionCount": int(config.get("retentionCount", 1)),
+            "intervalSeconds": int(config.get("intervalSeconds", 259200))
+        }
+    path = paths[0]
     stat = path.stat()
     return {
         "exists": True,
         "sizeBytes": stat.st_size,
-        "createdAt": datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(timespec="seconds")
+        "createdAt": datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(timespec="seconds"),
+        "archiveCount": len(paths),
+        "retentionCount": int(config.get("retentionCount", 1)),
+        "intervalSeconds": int(config.get("intervalSeconds", 259200))
     }
+
+
+def backup_archive_paths(game):
+    config = game.get("backup") or {}
+    if not config or not HOST_PROJECT_MOUNT.is_dir():
+        return []
+    directory = safe_host_path(config["directory"])
+    if not directory.is_dir():
+        return []
+    filename = str(config["filename"])
+    stem = filename[:-len("latest.tar.gz")] if filename.endswith("latest.tar.gz") else f"{Path(filename).stem}-"
+    history_pattern = re.compile(rf"^{re.escape(stem)}\d{{8}}-\d{{6}}(?:-\d{{6}})?\.tar\.gz$")
+    paths = [
+        path for path in directory.iterdir()
+        if path.is_file() and (path.name == filename or history_pattern.fullmatch(path.name))
+    ]
+    return sorted(paths, key=lambda path: path.stat().st_mtime, reverse=True)
+
+
+def prune_backup_archives(game):
+    keep = int((game.get("backup") or {}).get("retentionCount", 1))
+    for path in backup_archive_paths(game)[keep:]:
+        try:
+            path.unlink()
+            record_log(f"已按保留策略清理旧备份：{path.name}", game["id"])
+        except OSError as exc:
+            raise DockerError(500, f"无法清理旧备份 {path.name}：{exc}") from exc
 
 
 def validate_mod_filename(filename):
@@ -2215,19 +2296,65 @@ def persist_settings(game, values):
         ZOMBOID_DETAIL_CACHE.pop(game["id"], None)
 
 
-def clear_game_settings(game):
-    path = settings_store_path()
-    stored = read_settings_store()
-    if game["id"] not in stored:
-        return
-    stored.pop(game["id"], None)
+def validate_backup_settings(game, submitted):
+    if not game.get("backup"):
+        raise DockerError(400, "该游戏没有配置备份")
+    if not isinstance(submitted, dict) or set(submitted) != {"retentionCount", "intervalHours"}:
+        raise DockerError(400, "备份设置不完整")
+    try:
+        if isinstance(submitted["retentionCount"], bool) or isinstance(submitted["intervalHours"], bool):
+            raise ValueError
+        retention = int(submitted["retentionCount"])
+        interval_hours = int(submitted["intervalHours"])
+        if str(retention) != str(submitted["retentionCount"]).strip() or str(interval_hours) != str(submitted["intervalHours"]).strip():
+            raise ValueError
+    except (TypeError, ValueError) as exc:
+        raise DockerError(400, "备份保留份数和自动周期必须是整数") from exc
+    if not BACKUP_RETENTION_MIN <= retention <= BACKUP_RETENTION_MAX:
+        raise DockerError(400, f"备份保留份数必须在 {BACKUP_RETENTION_MIN} 到 {BACKUP_RETENTION_MAX} 之间")
+    if not BACKUP_INTERVAL_HOURS_MIN <= interval_hours <= BACKUP_INTERVAL_HOURS_MAX:
+        raise DockerError(
+            400,
+            f"自动备份周期必须在 {BACKUP_INTERVAL_HOURS_MIN} 到 {BACKUP_INTERVAL_HOURS_MAX} 小时之间"
+        )
+    return {"retentionCount": retention, "intervalSeconds": interval_hours * 3600}
+
+
+def persist_backup_settings(game, values):
+    path = backup_settings_store_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        stored = read_backup_settings_store()
+        stored[game["id"]] = values
         temporary = path.with_name(f".{path.name}.{threading.get_ident()}.tmp")
         temporary.write_text(json.dumps(stored, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         os.replace(temporary, path)
     except OSError as exc:
-        raise DockerError(500, f"无法保存网页配置：{exc}") from exc
+        raise DockerError(500, f"无法保存备份设置：{exc}") from exc
+    game["backup"].update(values)
+    prune_backup_archives(game)
+
+
+def clear_game_settings(game):
+    stores = (
+        (settings_store_path(), read_settings_store(), "网页配置"),
+        (backup_settings_store_path(), read_backup_settings_store(), "备份设置")
+    )
+    for path, stored, label in stores:
+        if game["id"] not in stored:
+            continue
+        stored.pop(game["id"], None)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_name(f".{path.name}.{threading.get_ident()}.tmp")
+            temporary.write_text(json.dumps(stored, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            os.replace(temporary, path)
+        except OSError as exc:
+            raise DockerError(500, f"无法保存{label}：{exc}") from exc
+    config = game.get("backup") or {}
+    if config:
+        config["retentionCount"] = int(config.get("_defaultRetentionCount", 1))
+        config["intervalSeconds"] = int(config.get("_defaultIntervalSeconds", 259200))
 
 
 def send_console(game, command):
@@ -2366,7 +2493,13 @@ def create_backup(game):
         record_log("开始创建世界备份", game["id"])
         with tarfile.open(temporary, "w:gz") as archive:
             archive.add(data_path, arcname="data", recursive=True)
+        if destination.is_file() and int(config.get("retentionCount", 1)) > 1:
+            timestamp = datetime.fromtimestamp(destination.stat().st_mtime).astimezone().strftime("%Y%m%d-%H%M%S-%f")
+            filename = str(config["filename"])
+            stem = filename[:-len("latest.tar.gz")] if filename.endswith("latest.tar.gz") else f"{Path(filename).stem}-"
+            os.replace(destination, backup_dir / f"{stem}{timestamp}.tar.gz")
         os.replace(temporary, destination)
+        prune_backup_archives(game)
         with STATE_LOCK:
             METRICS_CACHE.pop(game["id"], None)
         record_log(f"备份完成：{destination.name}", game["id"])
@@ -2987,6 +3120,38 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_response(201, {"message": f"已添加 {game['name']}"})
             except (DockerError, RuntimeError) as exc:
                 self.json_response(getattr(exc, "status", 500), {"error": str(exc)})
+            return
+        backup_settings_match = re.fullmatch(r"/api/games/([a-z0-9_-]+)/backup-settings", path)
+        if backup_settings_match:
+            game = GAME_INDEX.get(backup_settings_match.group(1))
+            if game is None:
+                self.json_response(404, {"error": "游戏未注册"})
+                return
+            if not ACTION_LOCK.acquire(blocking=False):
+                operation = operation_snapshot()
+                self.json_response(409, {
+                    "error": f"另一个操作正在执行：{operation.get('message', '请稍后再试')}",
+                    "operation": operation
+                })
+                return
+            try:
+                payload = self.read_json_body(maximum=4096)
+                values = validate_backup_settings(game, payload.get("settings"))
+                persist_backup_settings(game, values)
+                record_log(
+                    f"已更新备份设置：保留 {values['retentionCount']} 份，每 {values['intervalSeconds'] // 3600} 小时自动备份",
+                    game["id"]
+                )
+                self.json_response(200, {
+                    "message": "备份设置已保存",
+                    "backup": backup_info(game)
+                })
+            except DockerError as exc:
+                self.json_response(exc.status, {"error": str(exc)})
+            except RuntimeError as exc:
+                self.json_response(500, {"error": str(exc)})
+            finally:
+                ACTION_LOCK.release()
             return
         settings_match = re.fullmatch(r"/api/games/([a-z0-9_-]+)/settings", path)
         if settings_match:
