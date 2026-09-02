@@ -68,6 +68,7 @@ nas_game_server
 - [`compose.yaml`](compose.yaml) — 只启动网页总控
 - [`.env.example`](.env.example) — 管理账号、NAS 路径和游戏参数模板，复制为 `.env` 后填写
 - `config/game-settings.json` — 网页保存的游戏常用配置（运行后生成）
+- `config/backup-settings.json` — 网页保存的备份保留份数与自动周期（运行后生成）
 - [`controller/`](controller/)
   - [`Dockerfile`](controller/Dockerfile)
   - [`server.py`](controller/server.py) — Docker 控制 API 与静态文件服务
@@ -214,7 +215,7 @@ CONTROL_ACCOUNTS_JSON={"admin":"换成高强度密码","family":"另一个密码
 - 网页提交操作后会立即返回；总控在后台串行执行，同一时间只允许一个游戏操作，并在页面和日志窗口中公开当前阶段。
 - Minecraft 最长等待120秒优雅停止并保存世界。
 - 每次启动或停止都会把游戏容器的 Docker 重启策略更新为 `no`。
-- 所有游戏每72小时自动备份，也可在详情页手动备份。备份前会请求游戏保存世界，每个游戏都只保留最新一份；Project Zomboid 输出到 `zomboid/backups/zomboid-latest.tar.gz`。
+- 所有游戏默认每 72 小时自动备份，也可在详情页手动备份。详情页可为每个游戏设置保留 1–30 份、每 1–720 小时自动备份；前后端都会校验范围，避免误设成每秒备份。备份前会请求游戏保存世界，最新文件仍使用 `*-latest.tar.gz`，历史备份使用带时间戳的文件名。
 
 <a id="details"></a>
 ## 网页详情与玩家管理

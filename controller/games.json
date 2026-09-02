@@ -35,6 +35,7 @@
       "backup": {
         "directory": "minecraft/backups",
         "filename": "minecraft-latest.tar.gz",
+        "retentionCount": 1,
         "intervalSeconds": "${BACKUP_INTERVAL_SECONDS:-259200}",
         "checkIntervalSeconds": "${BACKUP_CHECK_INTERVAL_SECONDS:-3600}"
       },
@@ -128,6 +129,7 @@
       "backup": {
         "directory": "palworld/backups",
         "filename": "palworld-latest.tar.gz",
+        "retentionCount": 1,
         "intervalSeconds": "${BACKUP_INTERVAL_SECONDS:-259200}",
         "checkIntervalSeconds": "${BACKUP_CHECK_INTERVAL_SECONDS:-3600}"
       },
@@ -207,6 +209,7 @@
       "backup": {
         "directory": "terraria/backups",
         "filename": "terraria-latest.tar.gz",
+        "retentionCount": 1,
         "intervalSeconds": "${BACKUP_INTERVAL_SECONDS:-259200}",
         "checkIntervalSeconds": "${BACKUP_CHECK_INTERVAL_SECONDS:-3600}"
       },
@@ -308,6 +311,7 @@
       "backup": {
         "directory": "zomboid/backups",
         "filename": "zomboid-latest.tar.gz",
+        "retentionCount": 1,
         "intervalSeconds": "${BACKUP_INTERVAL_SECONDS:-259200}",
         "checkIntervalSeconds": "${BACKUP_CHECK_INTERVAL_SECONDS:-3600}"
       },

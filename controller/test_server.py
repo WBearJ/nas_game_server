@@ -154,6 +154,20 @@ class ControllerTests(unittest.TestCase):
         )
         self.assertEqual(SERVER.DockerClient.decode_output(payload), "helloworld")
 
+    def test_http_handler_uses_keep_alive_and_short_static_cache(self):
+        self.assertEqual(SERVER.Handler.protocol_version, "HTTP/1.1")
+        handler = object.__new__(SERVER.Handler)
+        handler.send_response = mock.Mock()
+        handler._headers = mock.Mock()
+        handler.end_headers = mock.Mock()
+        handler.wfile = io.BytesIO()
+
+        handler.serve_static("/session-bootstrap.js")
+
+        handler.send_response.assert_called_once_with(200)
+        self.assertEqual(handler._headers.call_args.kwargs["cache_control"], "public, max-age=300")
+        self.assertIn(b"gameControlSession", handler.wfile.getvalue())
+
     def test_container_stats_calculation(self):
         client = SERVER.DockerClient("unused")
         client.inspect = lambda _name: {"State": {"Status": "running"}}
@@ -205,6 +219,24 @@ class ControllerTests(unittest.TestCase):
         with mock.patch.object(SERVER.time, "monotonic_ns", side_effect=[1000000000, 2000000000]):
             self.assertEqual(client.stats("minecraft")["cpuPercent"], 0.0)
             self.assertEqual(client.stats("minecraft")["cpuPercent"], 100.0)
+
+    def test_container_stats_can_reuse_known_running_state(self):
+        client = SERVER.DockerClient("unused")
+        client.inspect = mock.Mock(side_effect=AssertionError("unexpected duplicate inspect"))
+        client._request = lambda *_args, **_kwargs: {
+            "cpu_stats": {
+                "cpu_usage": {"total_usage": 300},
+                "system_cpu_usage": 2000,
+                "online_cpus": 2
+            },
+            "precpu_stats": {
+                "cpu_usage": {"total_usage": 200},
+                "system_cpu_usage": 1000
+            },
+            "memory_stats": {"usage": 1000, "limit": 2000, "stats": {}}
+        }
+        self.assertEqual(client.stats("minecraft", known_running=True)["cpuPercent"], 20.0)
+        client.inspect.assert_not_called()
 
     def test_container_create_publishes_only_declared_udp_ports(self):
         client = SERVER.DockerClient("unused")
@@ -271,6 +303,30 @@ class ControllerTests(unittest.TestCase):
         self.assertIn("zomboid", game_ids)
         palworld = next(item for item in payload["containers"] if item["gameId"] == "palworld")
         self.assertIn("首次点击启动", palworld["logs"])
+
+    def test_recent_logs_reuses_container_inspection(self):
+        class RunningDocker:
+            def __init__(self):
+                self.inspections = {}
+
+            def inspect(self, name):
+                self.inspections[name] = self.inspections.get(name, 0) + 1
+                return {"State": {"Status": "running"}, "Config": {"Tty": False}}
+
+            def logs(self, name, _tail, info=None):
+                self.assert_info(info)
+                return f"{name} output"
+
+            @staticmethod
+            def assert_info(info):
+                if not info or info.get("State", {}).get("Status") != "running":
+                    raise AssertionError("container inspection was not reused")
+
+        docker = RunningDocker()
+        SERVER.DOCKER = docker
+        payload = SERVER.recent_logs(20)
+        self.assertTrue(payload["containers"])
+        self.assertTrue(all(count == 1 for count in docker.inspections.values()))
 
     def test_extract_json_output_ignores_log_prefix(self):
         payload = SERVER.extract_json_output("rest-cli: connected\n{\"players\":[]}")
@@ -339,6 +395,47 @@ class ControllerTests(unittest.TestCase):
             self.assertTrue(archive_path.is_file())
             with tarfile.open(archive_path, "r:gz") as archive:
                 self.assertIn("data/world/level.dat", archive.getnames())
+
+    def test_backup_retention_rolls_and_prunes_archives(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            data = root / "minecraft/data/world"
+            data.mkdir(parents=True)
+            game = {
+                "id": "minecraft",
+                "name": "Minecraft",
+                "primary": "minecraft-neoforge",
+                "dataPath": "minecraft/data",
+                "hostDirectories": ["minecraft/data", "minecraft/backups"],
+                "backup": {
+                    "directory": "minecraft/backups",
+                    "filename": "minecraft-latest.tar.gz",
+                    "retentionCount": 2
+                },
+                "containers": [{"name": "minecraft-neoforge"}]
+            }
+            SERVER.HOST_PROJECT_MOUNT = root
+            SERVER.DOCKER = FakeDocker()
+            for revision in range(3):
+                (data / "level.dat").write_bytes(f"world-{revision}".encode())
+                SERVER.create_backup(game)
+                time.sleep(0.01)
+
+            archives = SERVER.backup_archive_paths(game)
+            self.assertEqual(len(archives), 2)
+            self.assertEqual(archives[0].name, "minecraft-latest.tar.gz")
+            self.assertEqual(SERVER.backup_info(game)["archiveCount"], 2)
+
+    def test_backup_settings_enforce_safe_limits(self):
+        game = {"backup": {"directory": "backups"}}
+        self.assertEqual(
+            SERVER.validate_backup_settings(game, {"retentionCount": 5, "intervalHours": 24}),
+            {"retentionCount": 5, "intervalSeconds": 86400}
+        )
+        with self.assertRaises(SERVER.DockerError):
+            SERVER.validate_backup_settings(game, {"retentionCount": 5, "intervalHours": 0})
+        with self.assertRaises(SERVER.DockerError):
+            SERVER.validate_backup_settings(game, {"retentionCount": 31, "intervalHours": 24})
 
     def test_player_action_rejects_invalid_name(self):
         with self.assertRaises(SERVER.DockerError):
@@ -688,6 +785,26 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(payload["error"], "启动失败：镜像不存在")
         SERVER.clear_game_error(game["id"])
         self.assertEqual(SERVER.public_game(game)["error"], "")
+
+    def test_running_operation_tracks_latest_game_log(self):
+        original_operation = dict(SERVER.OPERATION)
+        try:
+            operation = SERVER.update_operation(
+                running=True,
+                gameId="minecraft",
+                message="准备启动 Minecraft",
+                startedAt=SERVER.now_iso(),
+                error=None
+            )
+            self.assertEqual(operation["latestLog"], "准备启动 Minecraft")
+            SERVER.record_log("容器启动指令已发送", "minecraft")
+            self.assertEqual(SERVER.operation_snapshot()["latestLog"], "容器启动指令已发送")
+            SERVER.record_log("无关日志", "controller")
+            self.assertEqual(SERVER.operation_snapshot()["latestLog"], "容器启动指令已发送")
+        finally:
+            with SERVER.STATE_LOCK:
+                SERVER.OPERATION.clear()
+                SERVER.OPERATION.update(original_operation)
 
     def test_action_worker_stores_and_clears_start_error(self):
         game = copy.deepcopy(next(item for item in SERVER.GAMES if item["id"] == "minecraft"))

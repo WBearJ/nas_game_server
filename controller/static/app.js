@@ -58,6 +58,7 @@ let activeOperation = { running: false };
 let activeGameId = null;
 let modBusy = false;
 let settingsBusy = false;
+let backupSettingsBusy = false;
 let activeDetailGame = null;
 let detailRenderSignature = "";
 let lastDetailRefresh = 0;
@@ -119,6 +120,7 @@ async function api(path, options = {}) {
 function setView(authenticated) {
   loginView.hidden = authenticated;
   dashboardView.hidden = !authenticated;
+  document.documentElement.classList.remove("session-pending");
   if (!authenticated && pollTimer) {
     window.clearInterval(pollTimer);
     pollTimer = null;
@@ -269,18 +271,41 @@ function setMetricValue(root, key, value) {
   if (node && node.textContent !== value) node.textContent = value;
 }
 
-function gameErrorText(game) {
-  if (activeOperation.running && activeOperation.gameId === game.id) return "";
-  return String(game.error || "").trim();
+function gameFeedback(game) {
+  if (activeOperation.running && activeOperation.gameId === game.id) {
+    return {
+      kind: "activity",
+      text: String(activeOperation.latestLog || activeOperation.message || "").trim()
+    };
+  }
+  const error = String(game.error || "").trim();
+  return error ? { kind: "error", text: error } : null;
 }
 
-function syncGameError(card, game) {
-  const text = gameErrorText(game);
-  const node = card.querySelector(".game-error");
+function syncGameFeedback(card, game) {
+  const feedback = gameFeedback(game);
+  const node = card.querySelector(".game-feedback");
   if (!node) return;
-  node.hidden = !text;
-  node.textContent = text ? tt(text) : "";
-  card.classList.toggle("has-error", Boolean(text));
+  node.hidden = !feedback;
+  node.classList.toggle("is-error", feedback?.kind === "error");
+  node.classList.toggle("is-activity", feedback?.kind === "activity");
+  card.classList.toggle("has-error", feedback?.kind === "error");
+  card.classList.toggle("has-activity", feedback?.kind === "activity");
+  if (!feedback) {
+    node.replaceChildren();
+    node.removeAttribute("role");
+    return;
+  }
+  node.setAttribute("role", feedback.kind === "error" ? "alert" : "status");
+  const message = createElement("p", "game-feedback-message", feedback.text);
+  if (feedback.kind === "error") {
+    const logs = createElement("button", "game-log-button", "查看日志");
+    logs.type = "button";
+    logs.addEventListener("click", () => openLogs(game.id));
+    node.replaceChildren(message, logs);
+  } else {
+    node.replaceChildren(message);
+  }
 }
 
 function actionButton(label, action, game, secondary = false) {
@@ -386,11 +411,10 @@ function renderGame(game) {
   const actions = createElement("div", "game-actions");
   renderGameActions(actions, game);
   actions.dataset.signature = `${game.state}:${Boolean(activeOperation.running)}`;
-  const error = createElement("p", "game-error");
-  error.setAttribute("role", "alert");
-  content.append(head, metrics, actions, error);
+  const feedback = createElement("div", "game-feedback");
+  content.append(head, metrics, actions, feedback);
   card.append(visual, content);
-  syncGameError(card, game);
+  syncGameFeedback(card, game);
   return card;
 }
 
@@ -415,7 +439,7 @@ function updateGameCard(card, game) {
     "pink"
   );
   setMetricValue(card, "disk", formatBytes(game.metrics?.diskBytes));
-  syncGameError(card, game);
+  syncGameFeedback(card, game);
   const actions = card.querySelector(".game-actions");
   const signature = `${game.state}:${Boolean(activeOperation.running)}`;
   if (actions?.dataset.signature !== signature) {
@@ -464,9 +488,6 @@ function render(payload) {
     }
   }
   lastUpdated.textContent = tt(`更新于 ${clockFormatter.format(new Date())}`);
-  if (activeOperation.running) {
-    setMessage(`${tt(activeOperation.message)}。可点击顶部“日志”查看详情。`);
-  }
 }
 
 function renderCatalogGame(game) {
@@ -958,7 +979,8 @@ function getDetailSignature(game) {
       action: activeOperation.action
     },
     modBusy,
-    settingsBusy
+    settingsBusy,
+    backupSettingsBusy
   });
 }
 
@@ -1505,19 +1527,47 @@ function renderDetail(game) {
   announceForm.append(announceInput, announceButton);
   announcePanel.append(announceHeading, announceForm);
 
-  const backupPanel = createElement("section", "detail-panel glass-panel");
-  const backupHeading = createElement("div", "panel-heading");
-  backupHeading.append(createElement("div", "", ""));
-  backupHeading.firstChild.append(createElement("p", "eyebrow", "备份"), createElement("h2", "", "世界快照"));
+  const backupPanel = createElement("section", "detail-panel glass-panel backup-panel");
+  const backupForm = createElement("form", "settings-form");
+  const backupHeading = createElement("div", "panel-heading settings-heading");
+  const backupTitle = document.createElement("div");
+  backupTitle.append(createElement("p", "eyebrow", "备份"), createElement("h2", "", "世界快照"));
+  const backupSave = createElement("button", "player-action", backupSettingsBusy ? "保存中" : "保存设置");
+  backupSave.type = "submit";
+  backupSave.disabled = backupSettingsBusy || Boolean(activeOperation.running);
+  backupHeading.append(backupTitle, backupSave);
   const backupFacts = createElement("dl", "detail-info");
   const backupDate = game.backup?.createdAt ? new Date(game.backup.createdAt).toLocaleString(i18n.locale) : t("尚未创建");
   backupFacts.append(
     infoRow("最近备份", backupDate),
-    infoRow("备份大小", game.backup?.exists ? formatBytes(game.backup.sizeBytes) : "—"),
-    infoRow("保留策略", "仅保留最新一份"),
-    infoRow("自动周期", "每 3 天")
+    infoRow("备份大小", game.backup?.exists ? formatBytes(game.backup.sizeBytes) : "—")
   );
-  backupPanel.append(backupHeading, backupFacts);
+  const backupFields = createElement("div", "settings-grid backup-settings-grid");
+  backupFields.append(
+    renderSettingField({
+      key: "retentionCount", label: "保留份数", type: "integer", min: 1, max: 30,
+      value: game.backup?.retentionCount ?? 1, suffix: "份", hint: "允许保留 1–30 份；调低后会立即清理超出的旧备份"
+    }),
+    renderSettingField({
+      key: "intervalHours", label: "自动周期", type: "integer", min: 1, max: 720,
+      value: Math.round((game.backup?.intervalSeconds ?? 259200) / 3600), suffix: "小时", hint: "允许 1–720 小时，最低 1 小时，避免过于频繁地压缩存档"
+    })
+  );
+  backupForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const retentionCount = backupForm.elements.retentionCount;
+    const intervalHours = backupForm.elements.intervalHours;
+    if (!retentionCount.checkValidity() || !intervalHours.checkValidity()) {
+      backupForm.reportValidity();
+      return;
+    }
+    await saveBackupSettings(game.id, {
+      retentionCount: Number(retentionCount.value),
+      intervalHours: Number(intervalHours.value)
+    });
+  });
+  backupForm.append(backupHeading, backupFacts, backupFields, createElement("p", "settings-note", "仅影响后续自动备份，无需重启游戏服务器。"));
+  backupPanel.append(backupForm);
 
   const containerPanel = createElement("section", "detail-panel glass-panel");
   const containerHeading = createElement("div", "panel-heading");
@@ -1680,6 +1730,25 @@ async function sendGameAnnouncement(gameId, message) {
   }
 }
 
+async function saveBackupSettings(gameId, settings) {
+  if (backupSettingsBusy) return;
+  backupSettingsBusy = true;
+  setMessage("正在保存备份设置");
+  try {
+    const payload = await api(`/api/games/${gameId}/backup-settings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings })
+    });
+    setMessage(payload.message);
+  } catch (error) {
+    setMessage(`备份设置保存失败：${error.message}`, true);
+  } finally {
+    backupSettingsBusy = false;
+    await loadGameDetail({ quiet: true });
+  }
+}
+
 async function saveGameSettings(gameId, settings) {
   if (activeOperation.running || settingsBusy) {
     setMessage(`正在执行：${activeOperation.message || "请稍后再试"}`, true);
@@ -1781,21 +1850,19 @@ async function deleteGame(game) {
 async function runAction(gameId, action, label) {
   if (activeOperation.running) {
     setMessage(`正在执行：${activeOperation.message}`, true);
-    openLogs(activeGameId === gameId ? gameId : null);
     return;
   }
   busyGame = gameId;
-  setMessage(`正在${label}服务，请稍候`);
+  setMessage("");
   await loadGames({ quiet: true });
   try {
     const payload = await api(`/api/games/${gameId}/${action}`, { method: "POST" });
     activeOperation = payload.operation;
-    setMessage(`${payload.operation.message}。日志窗口会持续显示进度。`);
-    openLogs(activeGameId === gameId ? gameId : null);
+    setMessage("");
+    await loadGames({ quiet: true });
     await monitorAction(gameId, label);
   } catch (error) {
     setMessage(error.message, true);
-    if (error.status === 409) openLogs(activeGameId === gameId ? gameId : null);
     busyGame = null;
     await loadGames({ quiet: true });
   }
@@ -1814,7 +1881,7 @@ async function monitorAction(gameId, label) {
     if (operation.running && operation.gameId === gameId) continue;
     busyGame = null;
     if (operation.error) {
-      setMessage(`${label}失败：${operation.error}`, true);
+      setMessage("");
     } else {
       setMessage(operation.message || `${label}操作已完成`);
     }
@@ -1859,31 +1926,63 @@ function renderLogs(payload) {
   logOperationStatus.classList.toggle("is-error", operationMatches && Boolean(operation.error));
   logsButton.classList.toggle("has-activity", Boolean(operation.running));
 
-  const sections = [];
   const controllerEntries = (payload.controller || []).filter(
     (entry) => !selectedGameId || entry.source === selectedGameId
   );
-  const controllerLines = controllerEntries.map((entry) => {
-    const level = entry.level === "error" ? "ERROR" : "INFO";
-    return `[${formatLogTimestamp(entry.timestamp)}] [${level}] [${entry.source}] ${tt(entry.message)}`;
-  });
   const controllerTitle = selectedGame ? tt(`${selectedGame.name} · 总控操作日志`) : tt("全部 · 总控操作日志");
-  sections.push(`===== ${controllerTitle} =====\n${controllerLines.join("\n") || t("暂无操作记录")}`);
-
   const containers = (payload.containers || []).filter(
     (container) => !selectedGameId || container.gameId === selectedGameId
   );
+  const signature = JSON.stringify({ controllerEntries, containers, selectedGameId });
+  if (signature === lastRenderedLogs) return;
+  const nearBottom = logOutput.scrollHeight - logOutput.scrollTop - logOutput.clientHeight < 60;
+
+  const sections = [];
+  const controllerSection = createElement("section", "log-section");
+  const controllerHeader = createElement("header", "log-section-header");
+  controllerHeader.append(createElement("h3", "", controllerTitle), createElement("span", "log-section-kind", "Controller"));
+  const controllerBody = createElement("div", "log-rows");
+  if (controllerEntries.length) {
+    for (const entry of controllerEntries) {
+      const row = createElement("div", `log-row${entry.level === "error" ? " is-error" : ""}`);
+      const timestamp = formatLogTimestamp(entry.timestamp);
+      const time = createElement("time", "log-time", timestamp.slice(-8));
+      time.dateTime = entry.timestamp || "";
+      time.title = timestamp;
+      row.append(
+        time,
+        createElement("span", "log-level", entry.level === "error" ? "ERROR" : "INFO"),
+        createElement("span", "log-source", entry.source),
+        createElement("span", "log-message", entry.message)
+      );
+      controllerBody.append(row);
+    }
+  } else {
+    controllerBody.append(createElement("p", "log-empty", "暂无操作记录"));
+  }
+  controllerSection.append(controllerHeader, controllerBody);
+  sections.push(controllerSection);
+
   for (const container of containers) {
-    sections.push(
-      `===== ${container.gameName || container.gameId} / ${container.name} · ${stateLabels[container.state] || container.state} =====\n${container.logs?.trim() || t("容器当前没有输出")}`
+    const section = createElement("section", "log-section");
+    const header = createElement("header", "log-section-header");
+    header.append(
+      createElement("h3", "", `${container.gameName || container.gameId} / ${container.name}`),
+      createElement("span", "log-state", stateLabels[container.state] || container.state)
     );
+    const stream = createElement("div", "log-stream");
+    const lines = String(container.logs || "").trim().split("\n").filter(Boolean);
+    if (lines.length) {
+      for (const line of lines) stream.append(createElement("div", "log-line", line));
+    } else {
+      stream.append(createElement("p", "log-empty", "容器当前没有输出"));
+    }
+    section.append(header, stream);
+    sections.push(section);
   }
 
-  const nextLogs = sections.join("\n\n");
-  if (nextLogs === lastRenderedLogs) return;
-  const nearBottom = logOutput.scrollHeight - logOutput.scrollTop - logOutput.clientHeight < 60;
-  logOutput.textContent = nextLogs;
-  lastRenderedLogs = nextLogs;
+  logOutput.replaceChildren(...sections);
+  lastRenderedLogs = signature;
   if (nearBottom) logOutput.scrollTop = logOutput.scrollHeight;
 }
 
